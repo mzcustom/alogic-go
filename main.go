@@ -4,32 +4,44 @@ import (
 	"fmt"
 	"github.com/gen2brain/raylib-go/raylib"
 	"crypto/rand"
+	"math"
 	"math/big"
-	"time"
+	//"time"
 )
 
 type i64 = int64
 type i32 = int32 
+type f64 = float64
 type f32 = float32
 type u8 = uint8
 
 type Vec2 = rl.Vector2
 
-func Vec2Sub(v1, v2 *Vec2) Vec2 {
-	return Vec2{v1.X - v2.X, v1.Y - v2.Y}
+func Vec2Add(v1, v2 Vec2) Vec2 { return Vec2{v1.X + v2.X, v1.Y + v2.Y} }
+
+func Vec2Sub(v1, v2 Vec2) Vec2 { return Vec2{v1.X - v2.X, v1.Y - v2.Y} }
+
+func Vec2Div(v Vec2, f f32) Vec2 { return Vec2{v.X / f, v.Y / f} }
+
+func Vec2Neg(v Vec2) Vec2 { return Vec2{-v.X, -v.Y} }
+
+func Vec2LenSq(v Vec2) f32 { return v.X * v.X + v.Y * v.Y }
+
+func Vec2Len(v Vec2) f64 { return math.Sqrt(f64(Vec2LenSq(v))) }
+
+func Vec2DistSq(v1, v2 Vec2) f32 { 
+	//distSqVec2 := Vec2Sub(v1, v2)
+	return Vec2LenSq(Vec2Sub(v1, v2)) 
+}
+
+func Vec2Dist(v1, v2 Vec2) f64 {
+	return math.Sqrt(f64(Vec2DistSq(v1, v2)))
 }
 
 func assert(b bool, msg string) {
 	if !b {
 		panic("Assert failed: " + msg + "!\n")
 	}
-}
-
-type Animal struct {
-	pos Vec2
-	dest Vec2
-	dx Vec2
-	animType u8
 }
 
 const (
@@ -51,6 +63,8 @@ const (
 	NUM_COLOR         = 4
 	NUM_KIND          = 4
 
+	FPS = 60
+	FRAME_TIME = f32(1) / f32(FPS)
 	// Raylib input int32 map
 	KEY_A = 65
 	KEY_S = 83
@@ -63,6 +77,15 @@ const (
 	KEY_DOWN = 264
 	KEY_UP = 265
 )
+
+// accel and veloc in pixel/frame
+type Animal struct {
+	pos Vec2
+	dest Vec2
+	accel Vec2
+	veloc Vec2
+	animType u8
+}
 
 func setAnimals(animals *[BOARD_SIZE]Animal) {
 	color, kind := u8(1), u8(1)
@@ -131,13 +154,27 @@ func findResquables(board *[BOARD_SIZE]*Animal, mostRecentRescuedType u8,
 
 func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal, 
               resqueIndex int, numAnimalLeft int) {
-    i := resqueIndex
-    assert(board[i].animType != 0, "animal to be resque has type 0")
+	i := resqueIndex			  
+    anim := board[resqueIndex]
+    assert(anim.animType != 0, "animal to be resque has type 0")
     
-    board[i].dest = Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}
-    // Remove setting pos to dest after implementing movement animation
-    board[i].pos = board[i].dest
-    resqued[BOARD_SIZE - numAnimalLeft] = board[i]
+    anim.dest = Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}
+	diff := Vec2Sub(anim.dest, anim.pos)
+	totalFrames := f32(20)  // Total Frame to get to the Resque Spot
+	frameAtTopY := f32(4)   // Totla Frame to reach the top of vertical jump
+	framesLeft := totalFrames - 2 * frameAtTopY
+	
+	// v * t + 1/2 * a * t*t = diff.Y 
+	// t is frame because veloc and accel is in pixel/frame
+	// a = v / frameAtTopY
+	// v * frameLeft + 0.5 * (v/frameAtTopY) * frameLeft * frameLeft = diff.Y
+	// v(frameLeft + 0.5 * frameLeft * frameLeft / frameAtTopY) = diff.Y
+	// v = diff.Y / (framesLeft + 0.5 * frameLeft * frameLeft / frameAtTopY)
+
+	anim.veloc = Vec2{diff.X / totalFrames, 
+					 -diff.Y / (framesLeft + 0.5 * framesLeft * framesLeft / frameAtTopY)}
+	anim.accel = Vec2{0, -anim.veloc.Y / frameAtTopY}
+	resqued[BOARD_SIZE - numAnimalLeft] = anim
 
 	// Advance the row where the selected animal is at 
     for i >= 0 && board[i] != nil {
@@ -148,12 +185,30 @@ func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal,
             board[i] = board[i - NUM_COL]
             prevPos := board[i].pos
             board[i].dest = Vec2{prevPos.X, prevPos.Y + ROW_HEIGHT}
-            // Remove setting pos to dest after implementing movement animation
-            board[i].pos = board[i].dest
-        }
+			diffVec2 := Vec2Sub(board[i].dest, board[i].pos)
+
+			positiveVeloc := Vec2Div(diffVec2, FPS/5)
+			board[i].accel = Vec2{0, positiveVeloc.Y / f32(FPS/10)} 
+			board[i].veloc = Vec2Neg(positiveVeloc)
+		}
         i -= NUM_COL
     }
 }
+
+/*
+func jumpAnimal(anim *Animal) {
+	anim.accel := Vec2{0, 1.0} 
+	diffVec2 := Vec2Sub(&anim.dest, &anim.pos)
+	anim.veloc = Vec2Div(&diffVec2, FPS/3)
+	anim.veloc = Vec2Neg(&anim.veloc)
+	
+
+
+	fmt.Printf("Anim at %b diffVec2: %v\n", anim.animType, diffVec2)
+	fmt.Printf("Anim at %b veloc: %f\n", anim.animType, anim.veloc)
+
+}
+*/
 
 func drawAnimal(animalsTexture *rl.Texture2D, animal *Animal) {
 	colorBitfield := animal.animType >> NUM_KIND
@@ -163,7 +218,7 @@ func drawAnimal(animalsTexture *rl.Texture2D, animal *Animal) {
     rect := rl.Rectangle{f32(kindOffset) * ANIM_SIZE, f32(colorOffset) * ANIM_SIZE,
                          ANIM_SIZE, ANIM_SIZE}
     animSizeOffset := Vec2{ANIM_SIZE / 2, ANIM_SIZE / 2}
-    rl.DrawTextureRec(*animalsTexture, rect, Vec2Sub(&animal.pos, &animSizeOffset), 
+    rl.DrawTextureRec(*animalsTexture, rect, Vec2Sub(animal.pos, animSizeOffset), 
 					  rl.RayWhite)
 }
 
@@ -212,6 +267,29 @@ func loadTextures(groundTexture, animalsTexture *rl.Texture2D) {
     rl.UnloadImage(animalsImage)
 }
 
+func updatePos(animals *[BOARD_SIZE]Animal) bool {
+	isAllUpdated := true
+	for i := range animals {
+		anim := &animals[i]
+		if !(anim.veloc == Vec2{}) || !(anim.accel == Vec2{}) {
+			isAllUpdated = false
+			pos := anim.pos
+			veloc := anim.veloc
+			anim.pos = Vec2Add(pos, veloc)
+			anim.veloc = Vec2Add(anim.veloc, anim.accel) 
+			
+			if Vec2DistSq(anim.pos, anim.dest) < Vec2LenSq(anim.veloc) / 2 {
+				anim.pos = anim.dest
+				anim.veloc = Vec2{}
+				anim.accel = Vec2{}
+
+				fmt.Printf("Touchdown anim[%d]\n", i) 
+			}
+		}
+	}
+	return isAllUpdated
+}
+
 func main() {
 	fmt.Println("Let's implement Animal logic in GO")
 	
@@ -233,6 +311,7 @@ func main() {
 
     numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
+	isAllPosUpdated := true
 
     prevLeft := numAnimalLeft
     mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -240,65 +319,68 @@ func main() {
     fmt.Printf("numPossibleMoves: %d, %v\n", numPossibleMoves, resquableIndex)
 
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
-    rl.SetTargetFPS(60)
+    rl.SetTargetFPS(FPS)
 
 	var groundTexture, animalsTexture rl.Texture2D
 	loadTextures(&groundTexture, &animalsTexture)
     
     for numAnimalLeft > 0 && !rl.WindowShouldClose() {
 
-        if prevLeft > numAnimalLeft {
-            assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
-            mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
-			for i := range resquableIndex { resquableIndex[i] = 0 }
-            numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
-            prevLeft = numAnimalLeft
-            fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
-            fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
-            printbd(&board)
-            
-            if numNextMoves == 0 {
-                fmt.Println("NO MORE MOVE LEFT!!")
-            }
-        }
+		if isAllPosUpdated {
+			if prevLeft > numAnimalLeft {
+				assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
+				mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
+				for i := range resquableIndex { resquableIndex[i] = 0 }
+				numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
+				prevLeft = numAnimalLeft
+				fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
+				fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
+				printbd(&board)
+				if numNextMoves == 0 {
+					fmt.Println("NO MORE MOVE LEFT!!")
+				}
+			}
 
-        if rl.IsKeyDown(KEY_A) || 
-		   (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-		    isAnimRectClicked(board[BOARD_SIZE - NUM_COL])) {
-            fmt.Println("A pressed ")
-            if resquableIndex[0] != 0 {
-				resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL, numAnimalLeft)
-                numAnimalLeft--
-                time.Sleep(time.Second * 1)
-            }
-        } else if rl.IsKeyDown(KEY_S) || 
-			(rl.IsMouseButtonDown(MOUSE_LEFT) && 
-			isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 1])) {
-            fmt.Println("S pressed ")
-            if resquableIndex[1] != 0 {
-                resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 1, numAnimalLeft)
-                numAnimalLeft--
-                time.Sleep(time.Second * 1)
-            }
-        } else if rl.IsKeyDown(KEY_D) || 
-		    (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-			 isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 2])) {
-            fmt.Println("D pressed ")
-            if resquableIndex[2] != 0 {
-                resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 2, numAnimalLeft)
-                numAnimalLeft--
-                time.Sleep(time.Second * 1)
-            }
-        } else if rl.IsKeyDown(KEY_F) ||  
-		    (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-			 isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 3])) {
-            fmt.Println("F pressed ")
-            if resquableIndex[3] != 0 {
-                resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 3, numAnimalLeft)
-                numAnimalLeft--
-                time.Sleep(time.Second * 1)
-            }
-        }
+			if rl.IsKeyDown(KEY_A) || 
+			   (rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				isAnimRectClicked(board[BOARD_SIZE - NUM_COL])) {
+				fmt.Println("A pressed ")
+				if resquableIndex[0] != 0 {
+					resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL, numAnimalLeft)
+					numAnimalLeft--
+					//time.Sleep(time.Second * 1)
+				}
+			} else if rl.IsKeyDown(KEY_S) || 
+				(rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 1])) {
+				fmt.Println("S pressed ")
+				if resquableIndex[1] != 0 {
+					resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 1, numAnimalLeft)
+					numAnimalLeft--
+					//time.Sleep(time.Second * 1)
+				}
+			} else if rl.IsKeyDown(KEY_D) || 
+				(rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				 isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 2])) {
+				fmt.Println("D pressed ")
+				if resquableIndex[2] != 0 {
+					resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 2, numAnimalLeft)
+					numAnimalLeft--
+					//time.Sleep(time.Second * 1)
+				}
+			} else if rl.IsKeyDown(KEY_F) ||  
+				(rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				 isAnimRectClicked(board[BOARD_SIZE - NUM_COL + 3])) {
+				fmt.Println("F pressed ")
+				if resquableIndex[3] != 0 {
+					resqueAt(&board, &resqued, BOARD_SIZE - NUM_COL + 3, numAnimalLeft)
+					numAnimalLeft--
+					//time.Sleep(time.Second * 1)
+				}
+			}
+		}
+
+		isAllPosUpdated = updatePos(&animals)
 
         rl.BeginDrawing()
         {
@@ -316,12 +398,20 @@ func main() {
                     drawAnimal(&animalsTexture, board[i])
                 }
             }
+			
+			for i :=0; i < BOARD_SIZE; i++ {
+                if resqued[i] != nil {
+                    drawAnimal(&animalsTexture, resqued[i])
+                }
+            }
             
+			/*
             if numAnimalLeft < BOARD_SIZE {
                 mostRecentResque := resqued[BOARD_SIZE - numAnimalLeft - 1]
                 assert(mostRecentResque != nil, "mostRecentResque is nil")
                 drawAnimal(&animalsTexture, mostRecentResque)
             }
+			*/
         }
         rl.EndDrawing()
     }
