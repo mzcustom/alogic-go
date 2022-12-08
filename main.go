@@ -155,25 +155,10 @@ func findResquables(board *[BOARD_SIZE]*Animal, mostRecentRescuedType u8,
 func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal, 
               resqueIndex int, numAnimalLeft int) {
 	i := resqueIndex			  
-    anim := board[resqueIndex]
+    anim := board[i]
     assert(anim.animType != 0, "animal to be resque has type 0")
-    
-    anim.dest = Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}
-	diff := Vec2Sub(anim.dest, anim.pos)
-	totalFrames := f32(20)  // Total Frame to get to the Resque Spot
-	frameAtTopY := f32(4)   // Totla Frame to reach the top of vertical jump
-	framesLeft := totalFrames - 2 * frameAtTopY
-	
-	// v * t + 1/2 * a * t*t = diff.Y 
-	// t is frame because veloc and accel is in pixel/frame
-	// a = v / frameAtTopY
-	// v * frameLeft + 0.5 * (v/frameAtTopY) * frameLeft * frameLeft = diff.Y
-	// v(frameLeft + 0.5 * frameLeft * frameLeft / frameAtTopY) = diff.Y
-	// v = diff.Y / (framesLeft + 0.5 * frameLeft * frameLeft / frameAtTopY)
 
-	anim.veloc = Vec2{diff.X / totalFrames, 
-					 -diff.Y / (framesLeft + 0.5 * framesLeft * framesLeft / frameAtTopY)}
-	anim.accel = Vec2{0, -anim.veloc.Y / frameAtTopY}
+	jumpAnimal(anim, Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}, 20, 4)
 	resqued[BOARD_SIZE - numAnimalLeft] = anim
 
 	// Advance the row where the selected animal is at 
@@ -183,32 +168,34 @@ func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal,
             break
         } else {
             board[i] = board[i - NUM_COL]
-            prevPos := board[i].pos
-            board[i].dest = Vec2{prevPos.X, prevPos.Y + ROW_HEIGHT}
-			diffVec2 := Vec2Sub(board[i].dest, board[i].pos)
-
-			positiveVeloc := Vec2Div(diffVec2, FPS/5)
-			board[i].accel = Vec2{0, positiveVeloc.Y / f32(FPS/10)} 
-			board[i].veloc = Vec2Neg(positiveVeloc)
+			anim := board[i]
+			jumpAnimal(anim, Vec2{anim.pos.X, anim.pos.Y + ROW_HEIGHT}, 20, 6)
 		}
         i -= NUM_COL
     }
 }
 
-/*
-func jumpAnimal(anim *Animal) {
-	anim.accel := Vec2{0, 1.0} 
-	diffVec2 := Vec2Sub(&anim.dest, &anim.pos)
-	anim.veloc = Vec2Div(&diffVec2, FPS/3)
-	anim.veloc = Vec2Neg(&anim.veloc)
-	
+// totalFrames: the total duration of the jump in frames.
+// ascFrames: the duration of animal moving upward ing in frames.
+func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
+	// desFrames: frames left at the its original position while desending to dest
+	// it takes exactly same frames going up and falling down to its original pos.
+	desFrames := totalFrames - 2 * ascFrames
+	diff := Vec2Sub(dest, anim.pos)
 
+	// v * t + 1/2 * a * t*t = diff.Y => Equation of motion
+	// t is in frame because veloc and accel is in pixel/frame
+	// a = -v / ascFrames => v is 0 when it reaches its top pos after ascFrames
+	// v * desFrames + 0.5 * (v / ascFrames) * desFrames * desFrames = diff.Y
+	// v(desFrames + 0.5 * desFrame * desFrame / ascFrames) = diff.Y
+	// v = diff.Y / (desFrames + 0.5 * desFrame * desFrame / ascFrames) 
 
-	fmt.Printf("Anim at %b diffVec2: %v\n", anim.animType, diffVec2)
-	fmt.Printf("Anim at %b veloc: %f\n", anim.animType, anim.veloc)
-
+	anim.veloc = Vec2{diff.X / totalFrames, 
+					 -diff.Y / (desFrames + 0.5 * desFrames * desFrames / ascFrames)}
+	anim.accel = Vec2{0, -anim.veloc.Y / ascFrames}
+	anim.dest = dest
 }
-*/
+
 
 func drawAnimal(animalsTexture *rl.Texture2D, animal *Animal) {
 	colorBitfield := animal.animType >> NUM_KIND
