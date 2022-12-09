@@ -14,6 +14,7 @@ type i32 = int32
 type f64 = float64
 type f32 = float32
 type u8 = uint8
+//type b8 = uint8
 
 type Vec2 = rl.Vector2
 
@@ -78,12 +79,15 @@ const (
 	KEY_UP = 265
 )
 
-// accel and veloc in pixel/frame
+// accel, veloc and press in pixels/frame.
 type Animal struct {
 	pos Vec2
 	dest Vec2
 	accel Vec2
 	veloc Vec2
+	rot i32
+	height f32
+	press f32
 	animType u8
 }
 
@@ -94,6 +98,7 @@ func setAnimals(animals *[BOARD_SIZE]Animal) {
 		colorBit := color << NUM_KIND
 		for col := 0; col < NUM_COL; col++ {
 			boardIndex := row * NUM_COL + col
+			animals[boardIndex].height = ANIM_SIZE 
 			animals[boardIndex].animType = colorBit | kind
 			kind <<= 1
 		}
@@ -197,16 +202,42 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
 }
 
 
-func drawAnimal(animalsTexture *rl.Texture2D, animal *Animal) {
-	colorBitfield := animal.animType >> NUM_KIND
-	kindBitfield := animal.animType & 0b1111
+func drawAnimal(animalsTexture *rl.Texture2D, anim *Animal) {
+	colorBitfield := anim.animType >> NUM_KIND
+	kindBitfield := anim.animType & 0b1111
 	colorOffset := NUM_COLOR - 1 - findFirst1Bit(colorBitfield)
 	kindOffset := NUM_KIND - 1 - findFirst1Bit(kindBitfield)
-    rect := rl.Rectangle{f32(kindOffset) * ANIM_SIZE, f32(colorOffset) * ANIM_SIZE,
+    srcRect := rl.Rectangle{f32(kindOffset) * ANIM_SIZE, f32(colorOffset) * ANIM_SIZE,
                          ANIM_SIZE, ANIM_SIZE}
-    animSizeOffset := Vec2{ANIM_SIZE / 2, ANIM_SIZE / 2}
-    rl.DrawTextureRec(*animalsTexture, rect, Vec2Sub(animal.pos, animSizeOffset), 
-					  rl.RayWhite)
+	if anim.press > 0 {
+		anim.height -= anim.press 	
+		if anim.height < 5 {
+			anim.height = 5
+		}
+		anim.press /= 2
+		if anim.press < 0.0001 {
+			anim.press = -1
+		}
+	}
+
+	if anim.press < 0 {
+		if anim.height - anim.press >= ANIM_SIZE {
+			anim.height = ANIM_SIZE
+			anim.press = 0
+		} else {
+			anim.height -= anim.press
+			anim.press *= 2
+		}
+	}
+
+	if anim.press != 0 {fmt.Printf("Anim press : %f\n", anim.press)}
+	
+	animOrigin := Vec2Sub(anim.pos, Vec2{ANIM_SIZE / 2, ANIM_SIZE / 2})
+	destPos := Vec2{animOrigin.X, animOrigin.Y + ANIM_SIZE - anim.height}
+	destRect := rl.Rectangle{destPos.X, destPos.Y, ANIM_SIZE, anim.height}
+
+	rl.DrawTexturePro(*animalsTexture, srcRect, destRect, Vec2{}, 0, rl.RayWhite)
+    //rl.DrawTextureRec(*animalsTexture, srcRect, destPos, rl.RayWhite)
 }
 
 func printbd (board *[BOARD_SIZE]*Animal) {
@@ -254,7 +285,8 @@ func loadTextures(groundTexture, animalsTexture *rl.Texture2D) {
     rl.UnloadImage(animalsImage)
 }
 
-func updatePos(animals *[BOARD_SIZE]Animal) bool {
+func updatePos(animals *[BOARD_SIZE]Animal, resqued *[BOARD_SIZE]*Animal,
+			   numAnimalLeft int) bool {
 	isAllUpdated := true
 	for i := range animals {
 		anim := &animals[i]
@@ -266,11 +298,40 @@ func updatePos(animals *[BOARD_SIZE]Animal) bool {
 			anim.veloc = Vec2Add(anim.veloc, anim.accel) 
 			
 			if Vec2DistSq(anim.pos, anim.dest) < Vec2LenSq(anim.veloc) / 2 {
+				if anim.veloc.Y > FPS/2 {
+					anim.press = anim.veloc.Y / 2.5 
+				}
+				
 				anim.pos = anim.dest
 				anim.veloc = Vec2{}
 				anim.accel = Vec2{}
+				
+				if resqued[1] != nil && anim == resqued[BOARD_SIZE - 1 - numAnimalLeft] {
 
-				fmt.Printf("Touchdown anim[%d]\n", i) 
+				prevAnimIndex := BOARD_SIZE - 2 - numAnimalLeft
+				prevAnim := resqued[prevAnimIndex]
+			    prevAnim.press = ANIM_SIZE
+
+				pushFactor := f32(prevAnimIndex/2 + 1)
+				if prevAnimIndex % 2 == 0 {
+					prevAnim.dest = Vec2Sub(prevAnim.pos, 
+											Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+					prevAnim.accel = Vec2{pushFactor * ANIM_SIZE*0.075, 0}
+					prevAnim.veloc = Vec2{pushFactor * -ANIM_SIZE*0.15, 0}
+				} else {
+					prevAnim.dest = Vec2Add(prevAnim.pos, 
+											Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+					prevAnim.accel = Vec2{pushFactor * -ANIM_SIZE*0.075, 0}
+					prevAnim.veloc = Vec2{pushFactor * ANIM_SIZE*0.15, 0}
+				}
+				
+
+				fmt.Printf("Touchdown anim[%d]\n", i)
+				fmt.Printf("Prev Anim: %b\n", 
+							prevAnim.animType)
+								
+				}
+				
 			}
 		}
 	}
@@ -367,7 +428,16 @@ func main() {
 			}
 		}
 
-		isAllPosUpdated = updatePos(&animals)
+		/*
+		var recentResque *Animal
+		if numAnimalLeft == BOARD_SIZE {
+			recentResque = nil
+		} else {
+			recentResque = resqued[BOARD_SIZE - 1 - numAnimalLeft]
+		}
+		*/
+
+		isAllPosUpdated = updatePos(&animals, &resqued, numAnimalLeft)
 
         rl.BeginDrawing()
         {
