@@ -9,13 +9,11 @@ import (
 	//"time"
 )
 
-type i64 = int64
-type i32 = int32 
-type f64 = float64
-type f32 = float32
-type u8 = uint8
-//type b8 = uint8
-
+type i64  = int64
+type i32  = int32 
+type f64  = float64
+type f32  = float32
+type u8   = uint8
 type Vec2 = rl.Vector2
 
 func Vec2Add(v1, v2 Vec2) Vec2 { return Vec2{v1.X + v2.X, v1.Y + v2.Y} }
@@ -30,20 +28,11 @@ func Vec2LenSq(v Vec2) f32 { return v.X * v.X + v.Y * v.Y }
 
 func Vec2Len(v Vec2) f64 { return math.Sqrt(f64(Vec2LenSq(v))) }
 
-func Vec2DistSq(v1, v2 Vec2) f32 { 
-	//distSqVec2 := Vec2Sub(v1, v2)
-	return Vec2LenSq(Vec2Sub(v1, v2)) 
-}
+func Vec2DistSq(v1, v2 Vec2) f32 { return Vec2LenSq(Vec2Sub(v1, v2)) }
 
-func Vec2Dist(v1, v2 Vec2) f64 {
-	return math.Sqrt(f64(Vec2DistSq(v1, v2)))
-}
+func Vec2Dist(v1, v2 Vec2) f64 { return math.Sqrt(f64(Vec2DistSq(v1, v2))) }
 
-func assert(b bool, msg string) {
-	if !b {
-		panic("Assert failed: " + msg + "!\n")
-	}
-}
+func assert(b bool, msg string) { if !b { panic("Assert failed: " + msg + "!\n") } }
 
 const (
 	WINDOW_WIDTH      = 560
@@ -57,6 +46,8 @@ const (
 	ROW_HEIGHT        = (UPPER_LAND_HEIGHT - 2 * MARGIN_HEIGHT) / NUM_ROW 
 	COL_WIDTH         = (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / NUM_COL
 	ANIM_SIZE f32     = ROW_HEIGHT * 0.65
+	ANIM_MIN_HEIGHT	  =	5
+	MAX_DUST_DURATION     = 20
 	RESQUE_SPOT_X     = MARGIN_WIDTH + (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / 2 
 	RESQUE_SPOT_Y     = (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT) + 
 						 (WINDOW_HEIGHT - (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT)) / 2 
@@ -65,14 +56,17 @@ const (
 	NUM_KIND          = 4
 
 	FPS = 60
-	FRAME_TIME = f32(1) / f32(FPS)
+
 	// Raylib input int32 map
 	KEY_A = 65
 	KEY_S = 83
 	KEY_D = 68
 	KEY_F = 70
+	KEY_G = 71
+	KEY_Q = 81
+	KEY_SPACE = 32
 	MOUSE_LEFT = 0
-	//MOUSE_RIGHT = 1
+	MOUSE_RIGHT = 1
 	KEY_RIGHT = 262
 	KEY_LEFT = 263
 	KEY_DOWN = 264
@@ -88,7 +82,14 @@ type Animal struct {
 	rot i32
 	height f32
 	press f32
+	dustDuration u8
 	animType u8
+}
+
+type Dust struct {
+	pos Vec2
+	scale f32
+	duration u8
 }
 
 func setAnimals(animals *[BOARD_SIZE]Animal) {
@@ -202,42 +203,32 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
 }
 
 
-func drawAnimal(animalsTexture *rl.Texture2D, anim *Animal) {
+func drawAnimal(animalsTexture *rl.Texture2D, dustTexture *rl.Texture2D, anim *Animal) {
 	colorBitfield := anim.animType >> NUM_KIND
 	kindBitfield := anim.animType & 0b1111
 	colorOffset := NUM_COLOR - 1 - findFirst1Bit(colorBitfield)
 	kindOffset := NUM_KIND - 1 - findFirst1Bit(kindBitfield)
     srcRect := rl.Rectangle{f32(kindOffset) * ANIM_SIZE, f32(colorOffset) * ANIM_SIZE,
                          ANIM_SIZE, ANIM_SIZE}
-	if anim.press > 0 {
-		anim.height -= anim.press 	
-		if anim.height < 5 {
-			anim.height = 5
-		}
-		anim.press /= 2
-		if anim.press < 0.0001 {
-			anim.press = -1
-		}
-	}
-
-	if anim.press < 0 {
-		if anim.height - anim.press >= ANIM_SIZE {
-			anim.height = ANIM_SIZE
-			anim.press = 0
-		} else {
-			anim.height -= anim.press
-			anim.press *= 2
-		}
-	}
-
-	if anim.press != 0 {fmt.Printf("Anim press : %f\n", anim.press)}
 	
 	animOrigin := Vec2Sub(anim.pos, Vec2{ANIM_SIZE / 2, ANIM_SIZE / 2})
-	destPos := Vec2{animOrigin.X, animOrigin.Y + ANIM_SIZE - anim.height}
-	destRect := rl.Rectangle{destPos.X, destPos.Y, ANIM_SIZE, anim.height}
+	desPos := Vec2{animOrigin.X, animOrigin.Y + ANIM_SIZE - anim.height}
+	desRect := rl.Rectangle{desPos.X, desPos.Y, ANIM_SIZE, anim.height}
 
-	rl.DrawTexturePro(*animalsTexture, srcRect, destRect, Vec2{}, 0, rl.RayWhite)
-    //rl.DrawTextureRec(*animalsTexture, srcRect, destPos, rl.RayWhite)
+	rl.DrawTexturePro(*animalsTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+	
+	// Draw dust
+	if anim.dustDuration != 0 { 
+		srcRect := rl.Rectangle{0, 0, 320, 256}
+		desRect := rl.Rectangle{anim.pos.X - ANIM_SIZE*0.7, anim.pos.Y + ANIM_SIZE*0.4, 
+								ANIM_SIZE*0.5, ANIM_SIZE*0.15} 
+		rl.DrawTexturePro(*dustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+
+		desRect = rl.Rectangle{anim.pos.X + ANIM_SIZE*0.2, anim.pos.Y + ANIM_SIZE*0.4,  
+								ANIM_SIZE*0.5, ANIM_SIZE*0.15} 
+		rl.DrawTexturePro(*dustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+		anim.dustDuration -= 1
+	}
 }
 
 func printbd (board *[BOARD_SIZE]*Animal) {
@@ -256,9 +247,7 @@ func printbd (board *[BOARD_SIZE]*Animal) {
 }
 
 func isAnimRectClicked(animal *Animal) bool {
-	if animal == nil {
-		return false
-	}
+	if animal == nil { return false}
 
 	mouseX := f32(rl.GetMouseX())
 	mouseY := f32(rl.GetMouseY())
@@ -273,93 +262,125 @@ func isAnimRectClicked(animal *Animal) bool {
 		   mouseY >= animPosY - halfLength && mouseY <= animPosY + halfLength   
 }
 
-func loadTextures(groundTexture, animalsTexture *rl.Texture2D) {
+func loadTextures(groundTexture, animalsTexture, dustTexture *rl.Texture2D) {
     groundImage := rl.LoadImage("textures/background.png")
     animalsImage := rl.LoadImage("textures/animals.png")
-    rl.ImageResize(groundImage, WINDOW_WIDTH, WINDOW_HEIGHT)
+    dustImage := rl.LoadImage("textures/dust.png")
+    
+	rl.ImageResize(groundImage, WINDOW_WIDTH, WINDOW_HEIGHT)
     rl.ImageResize(animalsImage, i32(ANIM_SIZE * NUM_COL), i32(ANIM_SIZE * NUM_ROW))
 
     *groundTexture = rl.LoadTextureFromImage(groundImage)
     *animalsTexture = rl.LoadTextureFromImage(animalsImage)
-    rl.UnloadImage(groundImage)
+    *dustTexture = rl.LoadTextureFromImage(dustImage)
+    
+	rl.UnloadImage(groundImage)
     rl.UnloadImage(animalsImage)
+    rl.UnloadImage(dustImage)
 }
 
 func updatePos(animals *[BOARD_SIZE]Animal, resqued *[BOARD_SIZE]*Animal,
 			   numAnimalLeft int) bool {
 	isAllUpdated := true
+
 	for i := range animals {
 		anim := &animals[i]
+		// Update Press and Height 
+		if anim.press > 0 {
+			anim.height -= anim.press 	
+			if anim.height < ANIM_MIN_HEIGHT {
+				anim.height = ANIM_MIN_HEIGHT
+			}
+			anim.press /= 2
+			if anim.press < 0.0001 {
+				anim.press = -1
+			}
+		}
+		if anim.press < 0 {
+			if anim.height - anim.press >= ANIM_SIZE {
+				anim.height = ANIM_SIZE
+				anim.press = 0
+			} else {
+				anim.height -= anim.press
+				anim.press *= 2
+			}
+		}
+
+		// Update Pos and Veloc if it's moving
 		if !(anim.veloc == Vec2{}) || !(anim.accel == Vec2{}) {
 			isAllUpdated = false
 			pos := anim.pos
 			veloc := anim.veloc
 			anim.pos = Vec2Add(pos, veloc)
 			anim.veloc = Vec2Add(anim.veloc, anim.accel) 
-			
+
+			// Take care of landing
 			if Vec2DistSq(anim.pos, anim.dest) < Vec2LenSq(anim.veloc) / 2 {
 				if anim.veloc.Y > FPS/2 {
 					anim.press = anim.veloc.Y / 2.5 
+					anim.dustDuration = MAX_DUST_DURATION
 				}
-				
 				anim.pos = anim.dest
 				anim.veloc = Vec2{}
 				anim.accel = Vec2{}
 				
+				// Take care of the previously resqued animal being landed upon
 				if resqued[1] != nil && anim == resqued[BOARD_SIZE - 1 - numAnimalLeft] {
 
-				prevAnimIndex := BOARD_SIZE - 2 - numAnimalLeft
-				prevAnim := resqued[prevAnimIndex]
-			    prevAnim.press = ANIM_SIZE
+					prevAnimIndex := BOARD_SIZE - 2 - numAnimalLeft
+					prevAnim := resqued[prevAnimIndex]
+					prevAnim.press = ANIM_SIZE
 
-				pushFactor := f32(prevAnimIndex/2 + 1)
-				if prevAnimIndex % 2 == 0 {
-					prevAnim.dest = Vec2Sub(prevAnim.pos, 
-											Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
-					prevAnim.accel = Vec2{pushFactor * ANIM_SIZE*0.075, 0}
-					prevAnim.veloc = Vec2{pushFactor * -ANIM_SIZE*0.15, 0}
-				} else {
-					prevAnim.dest = Vec2Add(prevAnim.pos, 
-											Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
-					prevAnim.accel = Vec2{pushFactor * -ANIM_SIZE*0.075, 0}
-					prevAnim.veloc = Vec2{pushFactor * ANIM_SIZE*0.15, 0}
+					pushFactor := f32(prevAnimIndex/2 + 1)
+					if prevAnimIndex % 2 == 0 {
+						prevAnim.dest = Vec2Sub(prevAnim.pos, 
+												Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+						prevAnim.accel = Vec2{pushFactor * ANIM_SIZE*0.075, 0}
+						prevAnim.veloc = Vec2{pushFactor * -ANIM_SIZE*0.15, 0}
+					} else {
+						prevAnim.dest = Vec2Add(prevAnim.pos, 
+												Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+						prevAnim.accel = Vec2{pushFactor * -ANIM_SIZE*0.075, 0}
+						prevAnim.veloc = Vec2{pushFactor * ANIM_SIZE*0.15, 0}
+					}
 				}
-				
-
-				fmt.Printf("Touchdown anim[%d]\n", i)
-				fmt.Printf("Prev Anim: %b\n", 
-							prevAnim.animType)
-								
-				}
-				
 			}
 		}
 	}
+
 	return isAllUpdated
 }
 
-func main() {
-	fmt.Println("Let's implement Animal logic in GO")
+func resetState(animals *[BOARD_SIZE]Animal, board *[BOARD_SIZE]*Animal,
+			    resqued *[BOARD_SIZE]*Animal) {
 	
-	animals := [BOARD_SIZE]Animal{}
+	*animals = [BOARD_SIZE]Animal{}
+	setAnimals(animals)
 
-	setAnimals(&animals)
-	fmt.Printf("Animals: %v\n", animals)
-
-	board := [BOARD_SIZE]*Animal{}
+	*board = [BOARD_SIZE]*Animal{}
 	for i := 0; i < BOARD_SIZE; i++ {
 		board[i] = &animals[i]
 	}
 
-	shuffleBoard(&board)
-	printbd(&board)
+	shuffleBoard(board)
+	printbd(board)
 
+	*resqued = [BOARD_SIZE]*Animal{}
+	printbd(resqued)
+}
+
+
+func main() {
+
+	animals := [BOARD_SIZE]Animal{}
+	board := [BOARD_SIZE]*Animal{}
 	resqued := [BOARD_SIZE]*Animal{}
-	printbd(&resqued)
+	resetState(&animals, &board, &resqued)
 
     numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
 	isAllPosUpdated := true
+	isQuitting := false
 
     prevLeft := numAnimalLeft
     mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -369,10 +390,10 @@ func main() {
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
     rl.SetTargetFPS(FPS)
 
-	var groundTexture, animalsTexture rl.Texture2D
-	loadTextures(&groundTexture, &animalsTexture)
+	var groundTexture, animalsTexture, dustTexture rl.Texture2D
+	loadTextures(&groundTexture, &animalsTexture, &dustTexture)
     
-    for numAnimalLeft > 0 && !rl.WindowShouldClose() {
+    for !isQuitting && !rl.WindowShouldClose() {
 
 		if isAllPosUpdated {
 			if prevLeft > numAnimalLeft {
@@ -425,55 +446,56 @@ func main() {
 					numAnimalLeft--
 					//time.Sleep(time.Second * 1)
 				}
+			} else if resqued[BOARD_SIZE - 1] != nil &&
+				(rl.IsKeyDown(KEY_G) || 
+				(rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				 isAnimRectClicked(resqued[BOARD_SIZE - 1]))) {
+				fmt.Println("G pressed! Play Again!")
+				resetState(&animals, &board, &resqued)
+				numAnimalLeft = BOARD_SIZE
+				resquableIndex = [NUM_COL]int{}
+				prevLeft = numAnimalLeft
+				mostRecentResqueType = u8(0xFF)  
+				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
+			} else if resqued[BOARD_SIZE - 1] != nil &&
+				(rl.IsKeyDown(KEY_Q) || rl.IsMouseButtonDown(MOUSE_RIGHT)) { 
+				fmt.Println("Quiting Game! Bye!")
+			} else if rl.IsKeyDown(KEY_Q) {
+				fmt.Println("Q pressed! Resetting the board!")
+				resetState(&animals, &board, &resqued)
+				numAnimalLeft = BOARD_SIZE
+				resquableIndex = [NUM_COL]int{}
+				prevLeft = numAnimalLeft
+				mostRecentResqueType = u8(0xFF)  
+				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 			}
 		}
-
-		/*
-		var recentResque *Animal
-		if numAnimalLeft == BOARD_SIZE {
-			recentResque = nil
-		} else {
-			recentResque = resqued[BOARD_SIZE - 1 - numAnimalLeft]
-		}
-		*/
 
 		isAllPosUpdated = updatePos(&animals, &resqued, numAnimalLeft)
 
         rl.BeginDrawing()
         {
 
-            /*
-            for anim in animals {
-              rl.DrawText(cstring(raw_data(anim.texture)), i32(anim.x), i32(anim.y), 20, rl.DARKGRAY)
-            }
-            */
-
             rl.DrawTextureEx(groundTexture, rl.Vector2{0, 0}, 0, 1, rl.RayWhite)
 
-			for i :=0; i < BOARD_SIZE; i++ {
+			for i := 0; i < BOARD_SIZE; i++ {
                 if board[i] != nil {
-                    drawAnimal(&animalsTexture, board[i])
+                    drawAnimal(&animalsTexture, &dustTexture, board[i])
                 }
             }
 			
-			for i :=0; i < BOARD_SIZE; i++ {
+			for i := 0; i < BOARD_SIZE - numAnimalLeft; i++ {
                 if resqued[i] != nil {
-                    drawAnimal(&animalsTexture, resqued[i])
+                    drawAnimal(&animalsTexture, &dustTexture, resqued[i])
                 }
             }
-            
-			/*
-            if numAnimalLeft < BOARD_SIZE {
-                mostRecentResque := resqued[BOARD_SIZE - numAnimalLeft - 1]
-                assert(mostRecentResque != nil, "mostRecentResque is nil")
-                drawAnimal(&animalsTexture, mostRecentResque)
-            }
-			*/
         }
         rl.EndDrawing()
-    }
-
-    if numAnimalLeft == 0 {
-        fmt.Println("ALL RESQUED!!")
+    
+		if numAnimalLeft == 0 {
+			fmt.Println("ALL RESQUED!!")
+			fmt.Println("Press G or Click the last animal resqued to play again!")
+			fmt.Println("Press Q or Right Click to quit!")
+		}
     }
 }
