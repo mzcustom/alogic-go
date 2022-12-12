@@ -111,7 +111,7 @@ func setAnimals(animals *[BOARD_SIZE]Animal) {
 	}
 }
 
-func shuffleBoard(board *[BOARD_SIZE]*Animal) {
+func shuffleBoard(board *[BOARD_SIZE]*Animal, frontRowPos *[NUM_COL]Vec2) {
 	for i := 0; i < BOARD_SIZE - 2; i++ {
 		rangeToLastIndex := i64(BOARD_SIZE - 1 - i)
 		randomIndex, _ := rand.Int(rand.Reader, big.NewInt(rangeToLastIndex))
@@ -123,13 +123,17 @@ func shuffleBoard(board *[BOARD_SIZE]*Animal) {
     for row := 0; row < NUM_COL; row++ {
         posY := f32(MARGIN_HEIGHT + (row * ROW_HEIGHT) + (ROW_HEIGHT / 2))
         for col := 0; col < NUM_ROW; col++ {
-			boardIndex := row * NUM_COL + col
+            boardIndex := row * NUM_COL + col
             posX := f32(MARGIN_WIDTH + (col * COL_WIDTH) + (COL_WIDTH / 2))
             board[boardIndex].dest = Vec2{posX, posY}
             // remove setting pos to dest after implementing the movement animation 
             board[boardIndex].pos = board[boardIndex].dest 
         }
     }
+	for i := 0; i < NUM_COL; i++ {
+		frontRowIndex := i + BOARD_SIZE - NUM_COL
+		frontRowPos[i] = board[frontRowIndex].dest
+	}
 }
 
 func findFirst1Bit(target u8) int {
@@ -148,7 +152,7 @@ func findFirst1Bit(target u8) int {
 func findResquables(board *[BOARD_SIZE]*Animal, mostRecentRescuedType u8,
 					nextAnimIndexes *[NUM_COL]int) int {
     var nextAnimNum int
-	frontRowOffset := BOARD_SIZE - NUM_COL
+    frontRowOffset := BOARD_SIZE - NUM_COL
 
     for i := 0; i < NUM_COL; i++ {
         if board[i + frontRowOffset] != nil && 
@@ -161,17 +165,16 @@ func findResquables(board *[BOARD_SIZE]*Animal, mostRecentRescuedType u8,
     return nextAnimNum
 }
 
-func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal, 
-              resqueIndex int, numAnimalLeft int) {
-	i := resqueIndex			  
+func resqueAt(board, resqued *[BOARD_SIZE]*Animal, resqueIndex, numAnimalLeft int) {
+    i := resqueIndex			  
     anim := board[i]
     assert(anim.animType != 0, "animal to be resque has type 0")
 
-	ascFrames := 2.5 * ANIM_SIZE/anim.height
-	totalFrames := 20 + ascFrames
-	if ascFrames < 4  { ascFrames, totalFrames = 4, 20 }
-	jumpAnimal(anim, Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}, totalFrames, ascFrames)
-	resqued[BOARD_SIZE - numAnimalLeft] = anim
+    ascFrames := 2.5 * ANIM_SIZE/anim.height
+    totalFrames := 20 + ascFrames
+    if ascFrames < 4  { ascFrames, totalFrames = 4, 20 }
+    jumpAnimal(anim, Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}, totalFrames, ascFrames)
+    resqued[BOARD_SIZE - numAnimalLeft] = anim
 
 	// Advance the row where the selected animal is at 
     for i >= 0 && board[i] != nil {
@@ -180,8 +183,8 @@ func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal,
             break
         } else {
             board[i] = board[i - NUM_COL]
-			anim := board[i]
-			jumpAnimal(anim, Vec2{anim.pos.X, anim.pos.Y + ROW_HEIGHT}, 20, 6)
+            anim := board[i]
+            jumpAnimal(anim, Vec2{anim.pos.X, anim.pos.Y + ROW_HEIGHT}, 20, 6)
 		}
         i -= NUM_COL
     }
@@ -189,7 +192,7 @@ func resqueAt(board *[BOARD_SIZE]*Animal, resqued *[BOARD_SIZE]*Animal,
 
 // totalFrames: the total duration of the jump in frames.
 // ascFrames: the duration of animal moving upward ing in frames.
-func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
+func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
 	// desFrames: frames left at the its original position while desending to dest
 	// it takes exactly same frames going up and falling down to its original pos.
 	desFrames := totalFrames - 2 * ascFrames
@@ -203,7 +206,7 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
 	// v = diff.Y / (desFrames + 0.5 * desFrame * desFrame / ascFrames) 
 
 	anim.veloc = Vec2{diff.X / totalFrames, 
-					 -diff.Y / (desFrames + 0.5 * desFrames * desFrames / ascFrames)}
+                     -diff.Y / (desFrames + 0.5 * desFrames * desFrames / ascFrames)}
 	anim.accel = Vec2{0, -anim.veloc.Y / ascFrames}
 	anim.dest = dest
 	anim.totalJumpFrames = u8(totalFrames)
@@ -214,7 +217,7 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames f32, ascFrames f32) {
 }
 
 
-func drawAnimal(animalsTexture *rl.Texture2D, dustTexture *rl.Texture2D, anim *Animal) {
+func drawAnimal(animalsTexture, dustTexture *rl.Texture2D, anim *Animal) {
 	colorBitfield := anim.animType >> NUM_KIND
 	kindBitfield := anim.animType & 0b1111
 	colorOffset := NUM_COLOR - 1 - findFirst1Bit(colorBitfield)
@@ -304,8 +307,68 @@ func loadTextures(groundTexture, animalsTexture, dustTexture *rl.Texture2D) {
     rl.UnloadImage(dustImage)
 }
 
-func updateAnimState(animals *[BOARD_SIZE]Animal, resqued *[BOARD_SIZE]*Animal,
-			   numAnimalLeft int) bool {
+func findLastRowEmpties(board *[BOARD_SIZE]*Animal, empties *[NUM_COL]bool) int {
+	var emptyColCount int
+	for i := 0; i < NUM_COL; i++ {
+		if board[i] == nil {
+			empties[i] = true
+			emptyColCount++
+		}
+	}
+	return emptyColCount
+}
+
+func moveResquedToBoard(board, resqued *[BOARD_SIZE]*Animal, boardIndex, resquedIndex int,
+                        numAnimalLeft *int, resquedChanged *bool) {
+    i := boardIndex
+	animToPush := resqued[resquedIndex]
+	resqued[resquedIndex] = nil
+
+    for i >= 0 {
+		nextAnimToPush := board[i]
+		board[i] = animToPush
+		if nextAnimToPush != nil {
+			jumpAnimal(nextAnimToPush, 
+			           Vec2{nextAnimToPush.pos.X, nextAnimToPush.pos.Y - ROW_HEIGHT}, 
+					   20, 12) 
+			animToPush = nextAnimToPush
+			i -= NUM_COL
+		} else { 
+			break 
+		}
+	}
+
+	*numAnimalLeft += 1
+	*resquedChanged = true
+}
+
+func scatterResqued(board, resqued *[BOARD_SIZE]*Animal, maxIndexToScatter int, 
+                    frontRowPos *[NUM_COL]Vec2, numAnimalLeft *int, resquedChanged *bool) {
+	lastRowEmptyIndices := [NUM_COL]bool{}
+	emptyCount := findLastRowEmpties(board, &lastRowEmptyIndices)
+    indexToMoveToBoard := maxIndexToScatter
+
+	for i := 0; i < NUM_COL; i++ {
+		if lastRowEmptyIndices[i] {
+			jumpAnimal(resqued[indexToMoveToBoard], frontRowPos[i], 24, 16)
+			frontRowIndexToJump := BOARD_SIZE - NUM_COL + i
+			moveResquedToBoard(board, resqued, frontRowIndexToJump, indexToMoveToBoard,
+		                       numAnimalLeft, resquedChanged)
+			indexToMoveToBoard--
+			emptyCount--
+			if indexToMoveToBoard < 0 || emptyCount < 1  { 
+				break
+			}
+		}
+	}
+
+	resqued[indexToMoveToBoard + 1] = resqued[maxIndexToScatter + 1]
+	resqued[maxIndexToScatter + 1] = nil
+}
+
+func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*Animal, 
+                     frontRowPos *[NUM_COL]Vec2, numAnimalLeft *int, 
+					 resquedChanged *bool) bool {
 	isAllUpdated := true
 
 	for i := range animals {
@@ -344,20 +407,31 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, resqued *[BOARD_SIZE]*Animal,
 			if Vec2DistSq(anim.pos, anim.dest) < Vec2LenSq(anim.veloc) / 2 {
 				if anim.veloc.Y > FPS/2 {
 					anim.press = anim.veloc.Y / 3 
-					if anim.veloc.Y > FPS { anim.dustDuration = MAX_DUST_DURATION }
+					if anim.veloc.Y > FPS { 
+						anim.dustDuration = MAX_DUST_DURATION
+					    lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
+					    if lastResquedIndex > 0 && anim == resqued[lastResquedIndex] {
+							//lastRowEmptyIndices := [NUM_COL]bool{}
+							//emptyCount := findLastRowEmpties(board, &lastRowEmptyIndices)
+							scatterResqued(board, resqued, BOARD_SIZE - 2 - *numAnimalLeft,
+						                   frontRowPos, numAnimalLeft, resquedChanged)
+						}
+					}
+
 				}
 				anim.pos = anim.dest
 				anim.veloc = Vec2{}
 				anim.accel = Vec2{}
+				anim.scale = 1
 				anim.scaleDecRate = 0
 				anim.totalJumpFrames = 0
 				anim.ascFrames = 0
 				anim.currJumpFrame = 0
 				
 				// Take care of the previously resqued animal being landed upon
-				if resqued[1] != nil && anim == resqued[BOARD_SIZE - 1 - numAnimalLeft] {
+				if resqued[1] != nil && anim == resqued[BOARD_SIZE - 1 - *numAnimalLeft] {
 
-					prevAnimIndex := BOARD_SIZE - 2 - numAnimalLeft
+					prevAnimIndex := BOARD_SIZE - 2 - *numAnimalLeft
 					prevAnim := resqued[prevAnimIndex]
 					prevAnim.press = ANIM_SIZE
 
@@ -381,8 +455,8 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, resqued *[BOARD_SIZE]*Animal,
 	return isAllUpdated
 }
 
-func resetState(animals *[BOARD_SIZE]Animal, board *[BOARD_SIZE]*Animal,
-			    resqued *[BOARD_SIZE]*Animal) {
+func resetState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*Animal,
+			    frontRowPos *[NUM_COL]Vec2) {
 	
 	*animals = [BOARD_SIZE]Animal{}
 	setAnimals(animals)
@@ -392,7 +466,7 @@ func resetState(animals *[BOARD_SIZE]Animal, board *[BOARD_SIZE]*Animal,
 		board[i] = &animals[i]
 	}
 
-	shuffleBoard(board)
+	shuffleBoard(board, frontRowPos)
 	printbd(board)
 
 	*resqued = [BOARD_SIZE]*Animal{}
@@ -409,15 +483,16 @@ func main() {
 	animals := [BOARD_SIZE]Animal{}
 	board := [BOARD_SIZE]*Animal{}
 	resqued := [BOARD_SIZE]*Animal{}
-	resetState(&animals, &board, &resqued)
+	frontRowPos := [NUM_COL]Vec2{}
+	resetState(&animals, &board, &resqued, &frontRowPos)
 
     numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
 	isAllAnimUpdated := true
 	isQuitting := false
 
-    prevLeft := numAnimalLeft
-    mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
+	resquedChanged := true
+	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
     numPossibleMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
     fmt.Printf("numPossibleMoves: %d, %v\n", numPossibleMoves, resquableIndex)
 
@@ -430,12 +505,12 @@ func main() {
     for !isQuitting && !rl.WindowShouldClose() {
 
 		if isAllAnimUpdated {
-			if prevLeft > numAnimalLeft {
-				assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
+			if resquedChanged && numAnimalLeft < BOARD_SIZE { 
+			assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
 				mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
 				for i := range resquableIndex { resquableIndex[i] = 0 }
 				numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
-				prevLeft = numAnimalLeft
+				resquedChanged = false
 				fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
 				fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
 				printbd(&board)
@@ -466,6 +541,7 @@ func main() {
 				if resquableIndex[0] != 0 {
 					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX, numAnimalLeft)
 					numAnimalLeft--
+					resquedChanged = true
 					//time.Sleep(time.Second * 1)
 				}
 			} else if rl.IsKeyReleased(KEY_S) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
@@ -474,6 +550,7 @@ func main() {
 				if resquableIndex[1] != 0 {
 					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 1, numAnimalLeft)
 					numAnimalLeft--
+					resquedChanged = true
 				}
 			} else if rl.IsKeyReleased(KEY_D) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
@@ -481,6 +558,7 @@ func main() {
 				if resquableIndex[2] != 0 {
 					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 2, numAnimalLeft)
 					numAnimalLeft--
+					resquedChanged = true
 				}
 			} else if rl.IsKeyReleased(KEY_F) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
@@ -488,15 +566,16 @@ func main() {
 				if resquableIndex[3] != 0 {
 					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 3, numAnimalLeft)
 					numAnimalLeft--
+					resquedChanged = true
 				}
 			} else if resqued[BOARD_SIZE - 1] != nil && (rl.IsKeyReleased(KEY_G) || 
 				(rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 				 isAnimRectClicked(resqued[BOARD_SIZE - 1]))) {
 				fmt.Println("G released!! Play Again!")
-				resetState(&animals, &board, &resqued)
+				resetState(&animals, &board, &resqued, &frontRowPos)
 				numAnimalLeft = BOARD_SIZE
 				resquableIndex = [NUM_COL]int{}
-				prevLeft = numAnimalLeft
+				resquedChanged = true
 				mostRecentResqueType = u8(0xFF)  
 				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 			} else if resqued[BOARD_SIZE - 1] != nil &&
@@ -505,16 +584,17 @@ func main() {
 				isQuitting = true
 			} else if rl.IsKeyDown(KEY_Q) {
 				fmt.Println("Q released!! Resetting the board!")
-				resetState(&animals, &board, &resqued)
+				resetState(&animals, &board, &resqued, &frontRowPos)
 				numAnimalLeft = BOARD_SIZE
 				resquableIndex = [NUM_COL]int{}
-				prevLeft = numAnimalLeft
+				resquedChanged = true
 				mostRecentResqueType = u8(0xFF)  
 				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 			}
 		}
 
-		isAllAnimUpdated = updateAnimState(&animals, &resqued, numAnimalLeft)
+		isAllAnimUpdated = updateAnimState(&animals, &board, &resqued, &frontRowPos, 
+		                                   &numAnimalLeft, &resquedChanged)
 
         rl.BeginDrawing()
         {
