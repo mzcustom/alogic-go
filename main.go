@@ -375,7 +375,7 @@ func scatterResqued(board, resqued *[BOARD_SIZE]*Animal, maxIndexToScatter int,
 
 func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*Animal, 
                      frontRowPos *[NUM_COL]Vec2, numAnimalLeft *int, 
-					 resquedChanged *bool) bool {
+					 resquedChanged *bool, bigJumpMade *bool) bool {
 	isAllUpdated := true
 
 	for i := range animals {
@@ -423,6 +423,7 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 				    if anim.veloc.Y > FPS { 
 						scatterResqued(board, resqued, lastResquedIndex - 1, frontRowPos,
 									   numAnimalLeft, resquedChanged)
+						*bigJumpMade = true
 				    } else {
 					// if veloc is little, compress and move the previously 
 					// resqued animal sideway
@@ -496,7 +497,8 @@ func main() {
 	isQuitting := false
 	gameMode := OPENING 
 	openingFrame := -1
-	firstMoveMade, secondMoveMade, bigJumpMade := false, false, false 
+	firstMoveMade, secondMoveMade, bigJumpMade, lastMessageShown := false, false, false, false
+	lastMessageFrames := -1
 
 	resquedChanged := true
 	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -521,11 +523,24 @@ func main() {
 					gameMode = GAME_PLAY
 				}
 			}
-		} else if gameMode == GAME_PLAY { 
+		} else if gameMode == GAME_PLAY {
+
+			if !lastMessageShown && lastMessageFrames >= 0 { 
+				lastMessageFrames++
+				if lastMessageFrames > FPS * 5 { lastMessageShown = true }
+			}
 
 			if isAllAnimUpdated {
 				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
-					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
+					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, 
+					       "resqued array has nil")
+					if !firstMoveMade { firstMoveMade = true }
+					if !secondMoveMade && numAnimalLeft < BOARD_SIZE - 1 { 
+						secondMoveMade = true
+					}
+					if firstMoveMade && secondMoveMade && bigJumpMade && !lastMessageShown {
+						lastMessageFrames = 0
+					}
 					mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
 					for i := range resquableIndex { resquableIndex[i] = 0 }
 					numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
@@ -623,7 +638,7 @@ func main() {
 		}
 
 		isAllAnimUpdated = updateAnimState(&animals, &board, &resqued, &frontRowPos, 
-		                                   &numAnimalLeft, &resquedChanged)
+		                                   &numAnimalLeft, &resquedChanged, &bigJumpMade)
 
         rl.BeginDrawing()
         {
@@ -645,17 +660,34 @@ func main() {
 			if gameMode == GAME_PLAY {
 				if isAllAnimUpdated {
 					if !firstMoveMade {
-
+                        rl.DrawText("Pick anyone from the front row", MARGIN_WIDTH, 
+				                    UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
 					} else if !secondMoveMade {
-
+                        rl.DrawText("Pick one with the same color or kind as the one before",
+						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
+									rl.LightGray)
 					} else if !bigJumpMade {
-
+                        rl.DrawText("Press and hold for the SUPER JUMP!",
+						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
+									rl.LightGray)
+					} else if !lastMessageShown {
+                        rl.DrawText("Great! Use SUPER JUMP before getting stuck!",
+						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
+									rl.LightGray)
 					}
 				}
 			} else if gameMode == GAME_CLEAR {
-
+                rl.DrawText("All animals has crossed!", MARGIN_WIDTH, 
+				            UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
+                rl.DrawText("Press space or click anywhere to play again!",
+				            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT/4, 23, 
+							rl.LightGray)
 			} else if gameMode == GAME_OVER {
-					
+                rl.DrawText("Oops, it's a dead-end!", MARGIN_WIDTH, 
+				            UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
+                rl.DrawText("Press space or click anywhere to try again!",
+				            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT/4, 23, 
+							rl.LightGray)
 			}
         }
         rl.EndDrawing()
