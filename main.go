@@ -46,6 +46,8 @@ const (
 	ROW_HEIGHT        = (UPPER_LAND_HEIGHT - 2 * MARGIN_HEIGHT) / NUM_ROW 
 	COL_WIDTH         = (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / NUM_COL
 	ANIM_SIZE f32     = ROW_HEIGHT * 0.65
+	DUST_IMAGE_WIDTH  = 320
+	DUST_IMAGE_HEIGHT = 256
 	MIN_ANIM_HEIGHT	  =	5
 	MIN_JUMP_HEIGHT   = MIN_ANIM_HEIGHT * 3
 	JUMP_SCALE_INC_RATE = 0.075
@@ -74,6 +76,15 @@ const (
 	KEY_LEFT = 263
 	KEY_DOWN = 264
 	KEY_UP = 265
+)
+
+type GameMode u8
+const (
+	TITLE GameMode = iota
+	OPENING
+	GAME_PLAY
+	GAME_CLEAR
+    GAME_OVER
 )
 
 // accel, veloc and press in pixels/frame.
@@ -126,8 +137,7 @@ func shuffleBoard(board *[BOARD_SIZE]*Animal, frontRowPos *[NUM_COL]Vec2) {
             boardIndex := row * NUM_COL + col
             posX := f32(MARGIN_WIDTH + (col * COL_WIDTH) + (COL_WIDTH / 2))
             board[boardIndex].dest = Vec2{posX, posY}
-            // remove setting pos to dest after implementing the movement animation 
-            board[boardIndex].pos = board[boardIndex].dest 
+			board[boardIndex].pos = Vec2{posX, posY - f32(4*ROW_HEIGHT)}
         }
     }
 	for i := 0; i < NUM_COL; i++ {
@@ -204,7 +214,7 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
 	//leastAlt = anim.pos.Y + 0.5*ascFrames*veloc (veloc is negative)
 	//dest.Y = leastAlt + 0.5*accel*(desFrame)^2
 	anim.accel = Vec2{0, 
-	                   2*(dest.Y-anim.pos.Y)/(desFrames*desFrames - ascFrames*ascFrames) }
+	                  2*(dest.Y-anim.pos.Y)/(desFrames*desFrames - ascFrames*ascFrames) }
 	anim.veloc = Vec2{(dest.X-anim.pos.X)/totalFrames, -anim.accel.Y*ascFrames}
 	anim.dest = dest
 	anim.totalJumpFrames = u8(totalFrames)
@@ -245,7 +255,7 @@ func drawAnimal(animalsTexture, dustTexture *rl.Texture2D, anim *Animal) {
 	
 	// Draw dust
 	if anim.dustDuration != 0 { 
-		srcRect := rl.Rectangle{0, 0, 320, 256}
+		srcRect := rl.Rectangle{0, 0, DUST_IMAGE_WIDTH, DUST_IMAGE_HEIGHT}
 		desRect := rl.Rectangle{anim.pos.X - ANIM_SIZE*0.7, anim.pos.Y + ANIM_SIZE*0.4, 
 								ANIM_SIZE*0.5, ANIM_SIZE*0.15} 
 		rl.DrawTexturePro(*dustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
@@ -258,15 +268,14 @@ func drawAnimal(animalsTexture, dustTexture *rl.Texture2D, anim *Animal) {
 }
 
 func printbd (board *[BOARD_SIZE]*Animal) {
-	var boardIndex int
-	for i := 0; i < NUM_ROW; i++ {
-		for j := 0; j < NUM_COL; j++ {
-			if board[boardIndex] == nil {
-				fmt.Printf("00000000 ")
-			} else {
-				fmt.Printf("%08b ", board[boardIndex].animType)
+	for row := 0; row < NUM_ROW; row++ {
+		for col := 0; col < NUM_COL; col++ {
+			anim := board[row*NUM_COL + col]
+			if anim == nil { 
+				fmt.Printf("00000000 ") 
+			} else { 
+				fmt.Printf("%08b ", anim.animType)
 			}
-			boardIndex++
 		}
 		fmt.Printf("\n")
 	}
@@ -485,6 +494,9 @@ func main() {
     resquableIndex := [NUM_COL]int{}
 	isAllAnimUpdated := true
 	isQuitting := false
+	gameMode := OPENING 
+	openingFrame := -1
+	firstMoveMade, secondMoveMade, bigJumpMade := false, false, false 
 
 	resquedChanged := true
 	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -499,93 +511,115 @@ func main() {
     
     for !isQuitting && !rl.WindowShouldClose() {
 
-		if isAllAnimUpdated {
-			if numAnimalLeft < BOARD_SIZE && resquedChanged { 
-			    assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
-				mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
-				for i := range resquableIndex { resquableIndex[i] = 0 }
-				numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
-				resquedChanged = false
-				fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
-				fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
-				printbd(&board)
-				if numNextMoves == 0 {
-					fmt.Println("NO MORE MOVE LEFT!!")
+		if gameMode == OPENING {
+			openingFrame++
+			if openingFrame % 10 == 0 {
+				anim := &animals[openingFrame / 10]
+				jumpAnimal(anim, anim.dest, 20, 4)  
+				if openingFrame / 10 == BOARD_SIZE - 1 {
+					openingFrame = -1
+					gameMode = GAME_PLAY
 				}
 			}
+		} else if gameMode == GAME_PLAY { 
 
-			if rl.IsKeyDown(KEY_A) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-			   isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
-				fmt.Println("A pressed!")
-				if resquableIndex[0] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX]) }
-			} else if rl.IsKeyDown(KEY_S) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
-				fmt.Println("S pressed!")
-				if resquableIndex[1] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+1]) }
-			} else if rl.IsKeyDown(KEY_D) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
-				fmt.Println("D pressed!")
-				if resquableIndex[2] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+2]) }
-			} else if rl.IsKeyDown(KEY_F) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
-				fmt.Println("F pressed!")
-				if resquableIndex[3] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+3]) }
-			} else if rl.IsKeyReleased(KEY_A) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
-				fmt.Println("A released!")
-				if resquableIndex[0] != 0 {
-					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX, numAnimalLeft)
-					numAnimalLeft--
-					resquedChanged = true
-					//time.Sleep(time.Second * 1)
+			if isAllAnimUpdated {
+				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
+					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
+					mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
+					for i := range resquableIndex { resquableIndex[i] = 0 }
+					numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
+					resquedChanged = false
+					fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
+					fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
+					printbd(&board)
+					if numAnimalLeft == 0 {
+						gameMode = GAME_CLEAR
+					} else if numNextMoves == 0 {
+						gameMode = GAME_OVER
+					}
 				}
-			} else if rl.IsKeyReleased(KEY_S) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
-				fmt.Println("S released!")
-				if resquableIndex[1] != 0 {
-					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 1, numAnimalLeft)
-					numAnimalLeft--
+
+				if rl.IsKeyDown(KEY_A) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
+				   isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
+					fmt.Println("A pressed!")
+					if resquableIndex[0] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX]) }
+				} else if rl.IsKeyDown(KEY_S) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
+					fmt.Println("S pressed!")
+					if resquableIndex[1] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+1]) }
+				} else if rl.IsKeyDown(KEY_D) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
+					fmt.Println("D pressed!")
+					if resquableIndex[2] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+2]) }
+				} else if rl.IsKeyDown(KEY_F) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
+					fmt.Println("F pressed!")
+					if resquableIndex[3] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+3]) }
+				} else if rl.IsKeyReleased(KEY_A) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
+					fmt.Println("A released!")
+					if resquableIndex[0] != 0 {
+						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX, numAnimalLeft)
+						numAnimalLeft--
+						resquedChanged = true
+						//time.Sleep(time.Second * 1)
+					}
+				} else if rl.IsKeyReleased(KEY_S) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
+					fmt.Println("S released!")
+					if resquableIndex[1] != 0 {
+						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 1, numAnimalLeft)
+						numAnimalLeft--
+						resquedChanged = true
+					}
+				} else if rl.IsKeyReleased(KEY_D) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
+					fmt.Println("D released!")
+					if resquableIndex[2] != 0 {
+						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 2, numAnimalLeft)
+						numAnimalLeft--
+						resquedChanged = true
+					}
+				} else if rl.IsKeyReleased(KEY_F) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
+					fmt.Println("F released!")
+					if resquableIndex[3] != 0 {
+						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 3, numAnimalLeft)
+						numAnimalLeft--
+						resquedChanged = true
+					}
+				} else if resqued[BOARD_SIZE - 1] != nil && (rl.IsKeyReleased(KEY_G) || 
+					(rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+					 isAnimRectClicked(resqued[BOARD_SIZE - 1]))) {
+					fmt.Println("G released!! Play Again!")
+					resetState(&animals, &board, &resqued, &frontRowPos)
+					numAnimalLeft = BOARD_SIZE
+					resquableIndex = [NUM_COL]int{}
 					resquedChanged = true
-				}
-			} else if rl.IsKeyReleased(KEY_D) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
-				fmt.Println("D released!")
-				if resquableIndex[2] != 0 {
-					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 2, numAnimalLeft)
-					numAnimalLeft--
+					mostRecentResqueType = u8(0xFF)  
+					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
+				} else if resqued[BOARD_SIZE - 1] != nil &&
+					(rl.IsKeyReleased(KEY_Q) || rl.IsMouseButtonReleased(MOUSE_RIGHT)) { 
+					fmt.Println("Quiting Game! Bye!")
+					isQuitting = true
+				} else if rl.IsKeyDown(KEY_Q) {
+					fmt.Println("Q released!! Resetting the board!")
+					resetState(&animals, &board, &resqued, &frontRowPos)
+					numAnimalLeft = BOARD_SIZE
+					resquableIndex = [NUM_COL]int{}
 					resquedChanged = true
+					mostRecentResqueType = u8(0xFF)  
+					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
+					gameMode = OPENING
 				}
-			} else if rl.IsKeyReleased(KEY_F) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-					  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
-				fmt.Println("F released!")
-				if resquableIndex[3] != 0 {
-					resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 3, numAnimalLeft)
-					numAnimalLeft--
-					resquedChanged = true
-				}
-			} else if resqued[BOARD_SIZE - 1] != nil && (rl.IsKeyReleased(KEY_G) || 
-				(rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-				 isAnimRectClicked(resqued[BOARD_SIZE - 1]))) {
-				fmt.Println("G released!! Play Again!")
-				resetState(&animals, &board, &resqued, &frontRowPos)
-				numAnimalLeft = BOARD_SIZE
-				resquableIndex = [NUM_COL]int{}
-				resquedChanged = true
-				mostRecentResqueType = u8(0xFF)  
-				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
-			} else if resqued[BOARD_SIZE - 1] != nil &&
-				(rl.IsKeyReleased(KEY_Q) || rl.IsMouseButtonReleased(MOUSE_RIGHT)) { 
-				fmt.Println("Quiting Game! Bye!")
-				isQuitting = true
-			} else if rl.IsKeyDown(KEY_Q) {
-				fmt.Println("Q released!! Resetting the board!")
-				resetState(&animals, &board, &resqued, &frontRowPos)
-				numAnimalLeft = BOARD_SIZE
-				resquableIndex = [NUM_COL]int{}
-				resquedChanged = true
-				mostRecentResqueType = u8(0xFF)  
-				numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 			}
+		} else if gameMode == GAME_CLEAR {
+			fmt.Println("ALL RESQUED!!")
+			fmt.Println("Press G or Click the last animal resqued to play again!")
+			fmt.Println("Press Q or Right Click to quit!")
+		} else if gameMode == GAME_OVER {
+			fmt.Println("No More Move Left!")
 		}
 
 		isAllAnimUpdated = updateAnimState(&animals, &board, &resqued, &frontRowPos, 
@@ -607,13 +641,23 @@ func main() {
                     drawAnimal(&animalsTexture, &dustTexture, resqued[i])
                 }
             }
+
+			if gameMode == GAME_PLAY {
+				if isAllAnimUpdated {
+					if !firstMoveMade {
+
+					} else if !secondMoveMade {
+
+					} else if !bigJumpMade {
+
+					}
+				}
+			} else if gameMode == GAME_CLEAR {
+
+			} else if gameMode == GAME_OVER {
+					
+			}
         }
         rl.EndDrawing()
-    
-		if numAnimalLeft == 0 {
-			fmt.Println("ALL RESQUED!!")
-			fmt.Println("Press G or Click the last animal resqued to play again!")
-			fmt.Println("Press Q or Right Click to quit!")
-		}
     }
 }
