@@ -192,22 +192,20 @@ func resqueAt(board, resqued *[BOARD_SIZE]*Animal, resqueIndex, numAnimalLeft in
 
 // totalFrames: the total duration of the jump in frames.
 // ascFrames: the duration of animal moving upward ing in frames.
+// if dest.Y is greater than anim.pos.Y, ascFrames has to be less than totalFrames/2
+// and dest.Y is less than anim.pos.Y, ascFrames has to be greater than totalFrmaes/2
+// TotalFrames CANNOT be exactly 2*ascFrames otherwise divided by 0 occurs
 func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
+
 	// desFrames: frames left at the its original position while desending to dest
-	// it takes exactly same frames going up and falling down to its original pos.
-	desFrames := totalFrames - 2 * ascFrames
-	diff := Vec2Sub(dest, anim.pos)
-
-	// v * t + 1/2 * a * t*t = diff.Y => Equation of motion
-	// t is in frame because veloc and accel is in pixel/frame
-	// a = -v / ascFrames => v is 0 when it reaches its top pos after ascFrames
-	// v * desFrames + 0.5 * (v / ascFrames) * desFrames * desFrames = diff.Y
-	// v(desFrames + 0.5 * desFrame * desFrame / ascFrames) = diff.Y
-	// v = diff.Y / (desFrames + 0.5 * desFrame * desFrame / ascFrames) 
-
-	anim.veloc = Vec2{diff.X / totalFrames, 
-                     -diff.Y / (desFrames + 0.5 * desFrames * desFrames / ascFrames)}
-	anim.accel = Vec2{0, -anim.veloc.Y / ascFrames}
+	desFrames := totalFrames - ascFrames
+	
+	//veloc = -accel * ascFrames (accel is positive)
+	//leastAlt = anim.pos.Y + 0.5*ascFrames*veloc (veloc is negative)
+	//dest.Y = leastAlt + 0.5*accel*(desFrame)^2
+	anim.accel = Vec2{0, 
+	                   2*(dest.Y-anim.pos.Y)/(desFrames*desFrames - ascFrames*ascFrames) }
+	anim.veloc = Vec2{(dest.X-anim.pos.X)/totalFrames, -anim.accel.Y*ascFrames}
 	anim.dest = dest
 	anim.totalJumpFrames = u8(totalFrames)
 	anim.ascFrames = u8(ascFrames)
@@ -394,7 +392,7 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 			}
 		}
 
-		// Update Pos and Veloc if it's moving
+		// Update Pos and Veloc if it's moving or has accel
 		if !(anim.veloc == Vec2{}) || !(anim.accel == Vec2{}) {
 			isAllUpdated = false
 			pos := anim.pos
@@ -405,49 +403,46 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 
 			// Take care of landing
 			if Vec2DistSq(anim.pos, anim.dest) < Vec2LenSq(anim.veloc) / 2 {
-				if anim.veloc.Y > FPS/2 {
-					anim.press = anim.veloc.Y / 3 
-					if anim.veloc.Y > FPS { 
-						anim.dustDuration = MAX_DUST_DURATION
-					    lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
-					    if lastResquedIndex > 0 && anim == resqued[lastResquedIndex] {
-							//lastRowEmptyIndices := [NUM_COL]bool{}
-							//emptyCount := findLastRowEmpties(board, &lastRowEmptyIndices)
-							scatterResqued(board, resqued, BOARD_SIZE - 2 - *numAnimalLeft,
-						                   frontRowPos, numAnimalLeft, resquedChanged)
+				if anim.veloc.Y > FPS/2 { anim.press = anim.veloc.Y / 3 }
+				if anim.veloc.Y > FPS { anim.dustDuration = MAX_DUST_DURATION }
+
+				// if the landing animal is the last resqued(the one crossing the bridge)
+				lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
+				if lastResquedIndex > 0 && anim == resqued[lastResquedIndex] {
+					// if the landing veloc is great, send previously resqued animals
+					// back to the main land above the bridge
+				    if anim.veloc.Y > FPS { 
+						scatterResqued(board, resqued, lastResquedIndex - 1, frontRowPos,
+									   numAnimalLeft, resquedChanged)
+				    } else {
+					// if veloc is little, compress and move the previously 
+					// resqued animal sideway
+						prevAnimIndex := lastResquedIndex - 1
+						prevAnim := resqued[prevAnimIndex]
+						prevAnim.press = ANIM_SIZE
+
+						pushFactor := f32(prevAnimIndex/2 + 1)
+						if prevAnimIndex % 2 == 0 {
+							prevAnim.dest = Vec2Sub(prevAnim.pos, 
+													Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+							prevAnim.accel = Vec2{pushFactor * ANIM_SIZE*0.075, 0}
+							prevAnim.veloc = Vec2{pushFactor * -ANIM_SIZE*0.15, 0}
+						} else {
+							prevAnim.dest = Vec2Add(prevAnim.pos, 
+													Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
+							prevAnim.accel = Vec2{pushFactor * -ANIM_SIZE*0.075, 0}
+							prevAnim.veloc = Vec2{pushFactor * ANIM_SIZE*0.15, 0}
 						}
 					}
-
 				}
+
 				anim.pos = anim.dest
-				anim.veloc = Vec2{}
-				anim.accel = Vec2{}
+				anim.veloc, anim.accel = Vec2{}, Vec2{}
 				anim.scale = 1
 				anim.scaleDecRate = 0
 				anim.totalJumpFrames = 0
 				anim.ascFrames = 0
 				anim.currJumpFrame = 0
-				
-				// Take care of the previously resqued animal being landed upon
-				if resqued[1] != nil && anim == resqued[BOARD_SIZE - 1 - *numAnimalLeft] {
-
-					prevAnimIndex := BOARD_SIZE - 2 - *numAnimalLeft
-					prevAnim := resqued[prevAnimIndex]
-					prevAnim.press = ANIM_SIZE
-
-					pushFactor := f32(prevAnimIndex/2 + 1)
-					if prevAnimIndex % 2 == 0 {
-						prevAnim.dest = Vec2Sub(prevAnim.pos, 
-												Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
-						prevAnim.accel = Vec2{pushFactor * ANIM_SIZE*0.075, 0}
-						prevAnim.veloc = Vec2{pushFactor * -ANIM_SIZE*0.15, 0}
-					} else {
-						prevAnim.dest = Vec2Add(prevAnim.pos, 
-												Vec2{pushFactor * ANIM_SIZE * 0.25, 0})
-						prevAnim.accel = Vec2{pushFactor * -ANIM_SIZE*0.075, 0}
-						prevAnim.veloc = Vec2{pushFactor * ANIM_SIZE*0.15, 0}
-					}
-				}
 			}
 		}
 	}
@@ -505,8 +500,8 @@ func main() {
     for !isQuitting && !rl.WindowShouldClose() {
 
 		if isAllAnimUpdated {
-			if resquedChanged && numAnimalLeft < BOARD_SIZE { 
-			assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
+			if numAnimalLeft < BOARD_SIZE && resquedChanged { 
+			    assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "resqued array has nil")
 				mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
 				for i := range resquableIndex { resquableIndex[i] = 0 }
 				numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
