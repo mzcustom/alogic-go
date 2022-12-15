@@ -55,13 +55,14 @@ const (
 	RESQUE_SPOT_X     = MARGIN_WIDTH + (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / 2 
 	RESQUE_SPOT_Y     = (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT) + 
 						 (WINDOW_HEIGHT - (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT)) / 2 
-	MAX_MSG_LEN       = 50
+	MAX_MSG_LEN       = 48
 	MSG_POS_Y         = UPPER_LAND_HEIGHT - MARGIN_HEIGHT
 	DEFAULT_FONT_SIZE = 25
 	BOARD_SIZE        = NUM_ROW * NUM_COL
 	FRONT_ROW_BASEINDEX = BOARD_SIZE - NUM_COL
 	NUM_COLOR         = 4
 	NUM_KIND          = 4
+	NUM_GAME_MODE     = 5
 
 	FPS = 60
 	INDEFINITE = -1
@@ -102,7 +103,7 @@ type Message struct {
 
 type Scripts struct {
 	currMsgNum int
-	msgs []Message
+	msgs [NUM_GAME_MODE][]Message
 }
 
 // accel, veloc and press in pixels/frame.
@@ -502,19 +503,21 @@ func processKeyDown(anim *Animal) {
 }
 
 func addMsg(scr *Scripts, duration int, mode GameMode, l1, l2 string) {
+	assert(mode > 0, "GameMode is less than 1 in the setNextMsg function")
 	for len(l1) < MAX_MSG_LEN {
 		l1 = " " + l1 + " "
 	}
 	for l2 != "" && len(l2) < MAX_MSG_LEN {
 		l2 = " " + l2 + " "
 	}
-	scr.msgs = append(scr.msgs, Message{l1, l2, duration, 1, 0, mode})
+	scr.msgs[mode-1] = append(scr.msgs[mode-1], Message{l1, l2, duration, 1, 0, mode})
 }
 
-func setNextMsg(msg *Message, scr *Scripts) {
-	*msg = scr.msgs[scr.currMsgNum]
+func setNextMsg(msg *Message, scr *Scripts, mode GameMode) {
+	assert(mode > 0, "GameMode is less than 1 in the setNextMsg function")
+	*msg = scr.msgs[mode-1][scr.currMsgNum]
 	scr.currMsgNum++
-	if scr.currMsgNum >= len(scr.msgs) { scr.currMsgNum = 0 }
+	if scr.currMsgNum >= len(scr.msgs[mode-1]) { scr.currMsgNum = 0 }
 }
 
 func main() {
@@ -534,9 +537,9 @@ func main() {
 	addMsg(&scripts, FPS*5, GAME_PLAY, "Great! Use SUPER JUMP wisely", 
 	       "before getting stuck")
 	addMsg(&scripts, INDEFINITE, GAME_CLEAR, "All animals has crossed!", 
-	       "Press space or click anywhere to play again!")
+	       "Press G or click the last one to play again!")
 	addMsg(&scripts, INDEFINITE, GAME_OVER, "Oops, it's a dead-end!", 
-	       "Press space or click anywhere to try again!")
+	       "Press G or click the last one to try again!")
 
 	numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
@@ -590,8 +593,10 @@ func main() {
 		    case GAME_PLAY:
 
 			if isAllAnimUpdated {
+				if msg.mode != gameMode { msg.mode = gameMode }
+
 				if !firstMoveMade && msg.frames == 0 {
-					setNextMsg(&msg, &scripts)
+					setNextMsg(&msg, &scripts, gameMode)
 				}
 
 				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
@@ -599,11 +604,11 @@ func main() {
 					       "resqued array has nil")
 					if !firstMoveMade { 
 						firstMoveMade = true
-					    setNextMsg(&msg, &scripts)
+					    setNextMsg(&msg, &scripts, gameMode)
 					}
 					if !secondMoveMade && numAnimalLeft < BOARD_SIZE - 1 && !bigJumpMade { 
 						secondMoveMade = true
-					    setNextMsg(&msg, &scripts)
+					    setNextMsg(&msg, &scripts, gameMode)
 					}
 					if bigJumpMade && !lastMsgShown{
 						if !secondMoveMade  {
@@ -611,7 +616,7 @@ func main() {
 							scripts.currMsgNum++
 						}
 						lastMsgShown = true
-					    setNextMsg(&msg, &scripts)
+					    setNextMsg(&msg, &scripts, gameMode)
 					}
 
 					mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
@@ -705,13 +710,47 @@ func main() {
 
 		    case GAME_CLEAR:
 
-			fmt.Println("ALL RESQUED!!")
-			fmt.Println("Press G or Click the last animal resqued to play again!")
-			fmt.Println("Press Q or Right Click to quit!")
-		    
+			if msg.mode != gameMode {
+			    scripts.currMsgNum = 0
+			    setNextMsg(&msg, &scripts, gameMode)
+			}
+			if isAllAnimUpdated {
+			
+				if rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
+					fmt.Println("G released on GAME_OVER! Play Again!")
+					resetState(&animals, &board, &resqued, &frontRowPos)
+					gameMode = OPENING
+					msg = Message{}
+					numAnimalLeft = BOARD_SIZE
+					resquableIndex = [NUM_COL]int{}
+					resquedChanged = true
+					mostRecentResqueType = u8(0xFF)  
+					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
+				}
+			}
+
 		    case GAME_OVER:
 			
-			fmt.Println("No More Move Left!")
+			if msg.mode != gameMode {
+			    scripts.currMsgNum = 0
+			    setNextMsg(&msg, &scripts, gameMode)
+			}
+			if isAllAnimUpdated {
+			
+				if rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
+					fmt.Println("G released on GAME_OVER! Play Again!")
+					resetState(&animals, &board, &resqued, &frontRowPos)
+					gameMode = OPENING
+					msg = Message{}
+					numAnimalLeft = BOARD_SIZE
+					resquableIndex = [NUM_COL]int{}
+					resquedChanged = true
+					mostRecentResqueType = u8(0xFF)  
+					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
+				}
+			}
 		}
 
 		isAllAnimUpdated = updateAnimState(&animals, &board, &resqued, &frontRowPos, 
@@ -720,7 +759,7 @@ func main() {
         rl.BeginDrawing()
         {
 
-            rl.DrawTextureEx(groundTexture, rl.Vector2{0, 0}, 0, 1, rl.RayWhite)
+            rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
 
 			for i := 0; i < BOARD_SIZE; i++ {
                 if board[i] != nil {
@@ -741,7 +780,7 @@ func main() {
 						alpha := (msg.frames*2 % 255*2) 
 						if alpha > 255 { alpha = 255*2 - alpha }
 						msg.alpha = u8(alpha)
-					} else if msg.alpha <= 253{
+					} else if msg.alpha <= 253 {
 					    msg.alpha += 2
 					}
 				} else {
@@ -760,8 +799,7 @@ func main() {
 				fontColor.A = u8(msg.alpha)
 
                 if msg.l2 == "" {
-				    rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, 
-					            fontColor)
+				    rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
 				} else {
 				    rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
 					            DEFAULT_FONT_SIZE, fontColor)
