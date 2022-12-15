@@ -55,12 +55,16 @@ const (
 	RESQUE_SPOT_X     = MARGIN_WIDTH + (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / 2 
 	RESQUE_SPOT_Y     = (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT) + 
 						 (WINDOW_HEIGHT - (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT)) / 2 
+	MAX_MSG_LEN       = 50
+	MSG_POS_Y         = UPPER_LAND_HEIGHT - MARGIN_HEIGHT
+	DEFAULT_FONT_SIZE = 25
 	BOARD_SIZE        = NUM_ROW * NUM_COL
 	FRONT_ROW_BASEINDEX = BOARD_SIZE - NUM_COL
 	NUM_COLOR         = 4
 	NUM_KIND          = 4
 
 	FPS = 60
+	INDEFINITE = -1
 
 	// Raylib input int32 map
 	KEY_A = 65
@@ -80,12 +84,26 @@ const (
 
 type GameMode u8
 const (
-	TITLE GameMode = iota
+	TITLE GameMode = iota + 1
 	OPENING
 	GAME_PLAY
 	GAME_CLEAR
     GAME_OVER
 )
+
+type Message struct {
+	l1 string
+	l2 string
+	duration int
+	frames int
+	alpha u8
+	mode GameMode
+}
+
+type Scripts struct {
+	currMsgNum int
+	msgs []Message
+}
 
 // accel, veloc and press in pixels/frame.
 type Animal struct {
@@ -419,7 +437,7 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 				lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
 				if lastResquedIndex > 0 && anim == resqued[lastResquedIndex] {
 					// if the landing veloc is great, send previously resqued animals
-					// back to the main land above the bridge
+					// back to the land above the bridge
 				    if anim.veloc.Y > FPS { 
 						scatterResqued(board, resqued, lastResquedIndex - 1, frontRowPos,
 									   numAnimalLeft, resquedChanged)
@@ -483,6 +501,22 @@ func processKeyDown(anim *Animal) {
 	if anim.height < MIN_JUMP_HEIGHT { anim.height = MIN_JUMP_HEIGHT } 
 }
 
+func addMsg(scr *Scripts, duration int, mode GameMode, l1, l2 string) {
+	for len(l1) < MAX_MSG_LEN {
+		l1 = " " + l1 + " "
+	}
+	for l2 != "" && len(l2) < MAX_MSG_LEN {
+		l2 = " " + l2 + " "
+	}
+	scr.msgs = append(scr.msgs, Message{l1, l2, duration, 1, 0, mode})
+}
+
+func setNextMsg(msg *Message, scr *Scripts) {
+	*msg = scr.msgs[scr.currMsgNum]
+	scr.currMsgNum++
+	if scr.currMsgNum >= len(scr.msgs) { scr.currMsgNum = 0 }
+}
+
 func main() {
 
 	animals := [BOARD_SIZE]Animal{}
@@ -491,14 +525,26 @@ func main() {
 	frontRowPos := [NUM_COL]Vec2{}
 	resetState(&animals, &board, &resqued, &frontRowPos)
 
-    numAnimalLeft := BOARD_SIZE
+	msg := Message{}
+	scripts := Scripts{}
+	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick anyone from the front row", "")
+	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick one with the same color or kind",
+	       "as the previous one")
+	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Press and hold for SUPER JUMP", "")
+	addMsg(&scripts, FPS*5, GAME_PLAY, "Great! Use SUPER JUMP wisely", 
+	       "before getting stuck")
+	addMsg(&scripts, INDEFINITE, GAME_CLEAR, "All animals has crossed!", 
+	       "Press space or click anywhere to play again!")
+	addMsg(&scripts, INDEFINITE, GAME_OVER, "Oops, it's a dead-end!", 
+	       "Press space or click anywhere to try again!")
+
+	numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
 	isAllAnimUpdated := true
 	isQuitting := false
 	gameMode := OPENING 
-	openingFrame := -1
-	firstMoveMade, secondMoveMade, bigJumpMade, lastMessageShown := false, false, false, false
-	lastMessageFrames := -1
+	openingFrame := 0
+	firstMoveMade, secondMoveMade, bigJumpMade, lastMsgShown := false, false, false, false
 
 	resquedChanged := true
 	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -511,36 +557,63 @@ func main() {
 	var groundTexture, animalsTexture, dustTexture rl.Texture2D
 	loadTextures(&groundTexture, &animalsTexture, &dustTexture)
     
+	// game loop
     for !isQuitting && !rl.WindowShouldClose() {
 
-		if gameMode == OPENING {
-			openingFrame++
-			if openingFrame % 10 == 0 {
-				anim := &animals[openingFrame / 10]
-				jumpAnimal(anim, anim.dest, 20, 4)  
-				if openingFrame / 10 == BOARD_SIZE - 1 {
-					openingFrame = -1
-					gameMode = GAME_PLAY
-				}
+		if msg.frames > 0 {
+			if msg.duration != INDEFINITE && msg.frames > msg.duration && msg.alpha < 2 { 
+				msg = Message{}
+			} else { 
+				msg.frames++
 			}
-		} else if gameMode == GAME_PLAY {
+	    }
 
-			if !lastMessageShown && lastMessageFrames >= 0 { 
-				lastMessageFrames++
-				if lastMessageFrames > FPS * 5 { lastMessageShown = true }
+	    switch gameMode {
+
+			case TITLE:	
+
+			fmt.Println("TITLE PAGE!!")
+
+		    case OPENING:
+
+			frameDiv := openingFrame / 10
+			frameMod := openingFrame % 10
+			if frameDiv < BOARD_SIZE {
+				anim := &animals[frameDiv]
+				if frameMod == 0 { jumpAnimal(anim, anim.dest, 20, 4) }
+			    openingFrame++
+			} else if isAllAnimUpdated {
+				openingFrame = 0
+				gameMode = GAME_PLAY
 			}
+
+		    case GAME_PLAY:
 
 			if isAllAnimUpdated {
+				if !firstMoveMade && msg.frames == 0 {
+					setNextMsg(&msg, &scripts)
+				}
+
 				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
 					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, 
 					       "resqued array has nil")
-					if !firstMoveMade { firstMoveMade = true }
-					if !secondMoveMade && numAnimalLeft < BOARD_SIZE - 1 { 
+					if !firstMoveMade { 
+						firstMoveMade = true
+					    setNextMsg(&msg, &scripts)
+					}
+					if !secondMoveMade && numAnimalLeft < BOARD_SIZE - 1 && !bigJumpMade { 
 						secondMoveMade = true
+					    setNextMsg(&msg, &scripts)
 					}
-					if firstMoveMade && secondMoveMade && bigJumpMade && !lastMessageShown {
-						lastMessageFrames = 0
+					if bigJumpMade && !lastMsgShown{
+						if !secondMoveMade  {
+							secondMoveMade = true
+							scripts.currMsgNum++
+						}
+						lastMsgShown = true
+					    setNextMsg(&msg, &scripts)
 					}
+
 					mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
 					for i := range resquableIndex { resquableIndex[i] = 0 }
 					numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
@@ -629,11 +702,15 @@ func main() {
 					gameMode = OPENING
 				}
 			}
-		} else if gameMode == GAME_CLEAR {
+
+		    case GAME_CLEAR:
+
 			fmt.Println("ALL RESQUED!!")
 			fmt.Println("Press G or Click the last animal resqued to play again!")
 			fmt.Println("Press Q or Right Click to quit!")
-		} else if gameMode == GAME_OVER {
+		    
+		    case GAME_OVER:
+			
 			fmt.Println("No More Move Left!")
 		}
 
@@ -656,38 +733,41 @@ func main() {
                     drawAnimal(&animalsTexture, &dustTexture, resqued[i])
                 }
             }
-
-			if gameMode == GAME_PLAY {
-				if isAllAnimUpdated {
-					if !firstMoveMade {
-                        rl.DrawText("Pick anyone from the front row", MARGIN_WIDTH, 
-				                    UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
-					} else if !secondMoveMade {
-                        rl.DrawText("Pick one with the same color or kind as the one before",
-						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
-									rl.LightGray)
-					} else if !bigJumpMade {
-                        rl.DrawText("Press and hold for the SUPER JUMP!",
-						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
-									rl.LightGray)
-					} else if !lastMessageShown {
-                        rl.DrawText("Great! Use SUPER JUMP before getting stuck!",
-						            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, 
-									rl.LightGray)
+				
+			if gameMode == msg.mode {
+				fontColor := rl.Gold
+				if msg.duration == INDEFINITE {
+					if msg.frames < FPS*3 {
+						alpha := (msg.frames*2 % 255*2) 
+						if alpha > 255 { alpha = 255*2 - alpha }
+						msg.alpha = u8(alpha)
+					} else if msg.alpha <= 253{
+					    msg.alpha += 2
+					}
+				} else {
+					if msg.frames <= msg.duration {
+						alpha := (msg.frames*2 % 255*2) 
+						if alpha > 255 { alpha = 255*2 - alpha }
+						msg.alpha = u8(alpha)
+					} else {
+						if msg.alpha <= 1 {
+							msg.alpha = 0
+						} else {
+							msg.alpha -= 2
+						}
 					}
 				}
-			} else if gameMode == GAME_CLEAR {
-                rl.DrawText("All animals has crossed!", MARGIN_WIDTH, 
-				            UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
-                rl.DrawText("Press space or click anywhere to play again!",
-				            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT/4, 23, 
-							rl.LightGray)
-			} else if gameMode == GAME_OVER {
-                rl.DrawText("Oops, it's a dead-end!", MARGIN_WIDTH, 
-				            UPPER_LAND_HEIGHT - MARGIN_HEIGHT, 23, rl.LightGray)
-                rl.DrawText("Press space or click anywhere to try again!",
-				            MARGIN_WIDTH, UPPER_LAND_HEIGHT - MARGIN_HEIGHT/4, 23, 
-							rl.LightGray)
+				fontColor.A = u8(msg.alpha)
+
+                if msg.l2 == "" {
+				    rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, 
+					            fontColor)
+				} else {
+				    rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
+					            DEFAULT_FONT_SIZE, fontColor)
+				    rl.DrawText(msg.l2, 0, MSG_POS_Y + DEFAULT_FONT_SIZE/2, 
+					            DEFAULT_FONT_SIZE, fontColor)
+				}
 			}
         }
         rl.EndDrawing()
