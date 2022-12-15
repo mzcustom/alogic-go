@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"math"
 	"math/big"
-	//"time"
+	"time"
 )
 
 type i64  = int64
@@ -97,6 +97,7 @@ type Message struct {
 	l2 string
 	duration int
 	frames int
+	displayed bool
 	alpha u8
 	mode GameMode
 }
@@ -232,8 +233,14 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
 	//veloc = -accel * ascFrames (accel is positive)
 	//leastAlt = anim.pos.Y + 0.5*ascFrames*veloc (veloc is negative)
 	//dest.Y = leastAlt + 0.5*accel*(desFrame)^2
+	var diff f32
+	if anim.pos.Y == dest.Y {
+		diff = -ANIM_SIZE
+	} else {
+		diff = dest.Y - anim.pos.Y
+	}
 	anim.accel = Vec2{0, 
-	                  2*(dest.Y-anim.pos.Y)/(desFrames*desFrames - ascFrames*ascFrames) }
+	                  2*diff/(desFrames*desFrames - ascFrames*ascFrames) }
 	anim.veloc = Vec2{(dest.X-anim.pos.X)/totalFrames, -anim.accel.Y*ascFrames}
 	anim.dest = dest
 	anim.totalJumpFrames = u8(totalFrames)
@@ -394,7 +401,7 @@ func scatterResqued(board, resqued *[BOARD_SIZE]*Animal, maxIndexToScatter int,
 
 func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*Animal, 
                      frontRowPos *[NUM_COL]Vec2, numAnimalLeft *int, 
-					 resquedChanged *bool, bigJumpMade *bool) bool {
+					 resquedChanged *bool, bigJumpMade *bool, mode GameMode) bool {
 	isAllUpdated := true
 
 	for i := range animals {
@@ -436,7 +443,8 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 
 				// if the landing animal is the last resqued(the one crossing the bridge)
 				lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
-				if lastResquedIndex > 0 && anim == resqued[lastResquedIndex] {
+				if mode == GAME_PLAY && lastResquedIndex > 0 && 
+				   anim == resqued[lastResquedIndex] {
 					// if the landing veloc is great, send previously resqued animals
 					// back to the land above the bridge
 				    if anim.veloc.Y > FPS { 
@@ -510,14 +518,17 @@ func addMsg(scr *Scripts, duration int, mode GameMode, l1, l2 string) {
 	for l2 != "" && len(l2) < MAX_MSG_LEN {
 		l2 = " " + l2 + " "
 	}
-	scr.msgs[mode-1] = append(scr.msgs[mode-1], Message{l1, l2, duration, 1, 0, mode})
+	scr.msgs[mode-1] = append(scr.msgs[mode-1], Message{l1, l2, duration, 1, false, 0, mode})
 }
 
-func setNextMsg(msg *Message, scr *Scripts, mode GameMode) {
+func setMsg(msg *Message, scr *Scripts, mode GameMode, msgNum int) {
 	assert(mode > 0, "GameMode is less than 1 in the setNextMsg function")
-	*msg = scr.msgs[mode-1][scr.currMsgNum]
-	scr.currMsgNum++
-	if scr.currMsgNum >= len(scr.msgs[mode-1]) { scr.currMsgNum = 0 }
+	if msgNum >= len(scr.msgs[mode-1]) { 
+		fmt.Printf("msgNum %d is greater than the msg len for game mode %d!\n", msgNum, mode)
+		*msg = Message{}
+	} else {
+	    *msg = scr.msgs[mode-1][msgNum]
+	}
 }
 
 func main() {
@@ -530,9 +541,8 @@ func main() {
 
 	msg := Message{}
 	scripts := Scripts{}
-	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick anyone from the front row", "")
-	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick one with the same color or kind",
-	       "as the previous one")
+	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick one from the front row carefully", 
+	       "The following has to be same kind or color")
 	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Press and hold for SUPER JUMP", "")
 	addMsg(&scripts, FPS*5, GAME_PLAY, "Great! Use SUPER JUMP wisely", 
 	       "before getting stuck")
@@ -547,7 +557,9 @@ func main() {
 	isQuitting := false
 	gameMode := OPENING 
 	openingFrame := 0
-	firstMoveMade, secondMoveMade, bigJumpMade, lastMsgShown := false, false, false, false
+    gameClearFrame := 0
+	willReplay := false
+	firstMoveMade, bigJumpMade, lastMsgShown := false, false, false
 
 	resquedChanged := true
 	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
@@ -596,27 +608,22 @@ func main() {
 				if msg.mode != gameMode { msg.mode = gameMode }
 
 				if !firstMoveMade && msg.frames == 0 {
-					setNextMsg(&msg, &scripts, gameMode)
+					setMsg(&msg, &scripts, gameMode, 0)
 				}
 
 				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
 					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, 
 					       "resqued array has nil")
-					if !firstMoveMade { 
+					if !firstMoveMade {
 						firstMoveMade = true
-					    setNextMsg(&msg, &scripts, gameMode)
+					    setMsg(&msg, &scripts, gameMode, 1)
 					}
-					if !secondMoveMade && numAnimalLeft < BOARD_SIZE - 1 && !bigJumpMade { 
-						secondMoveMade = true
-					    setNextMsg(&msg, &scripts, gameMode)
+					if !bigJumpMade && numAnimalLeft < BOARD_SIZE - 1 { 
+					    setMsg(&msg, &scripts, gameMode, 1)
 					}
 					if bigJumpMade && !lastMsgShown{
-						if !secondMoveMade  {
-							secondMoveMade = true
-							scripts.currMsgNum++
-						}
 						lastMsgShown = true
-					    setNextMsg(&msg, &scripts, gameMode)
+					    setMsg(&msg, &scripts, gameMode, 2)
 					}
 
 					mostRecentResqueType := resqued[BOARD_SIZE - numAnimalLeft - 1].animType
@@ -710,17 +717,21 @@ func main() {
 
 		    case GAME_CLEAR:
 
-			if msg.mode != gameMode {
-			    scripts.currMsgNum = 0
-			    setNextMsg(&msg, &scripts, gameMode)
-			}
-			if isAllAnimUpdated {
+			if msg.mode != gameMode { setMsg(&msg, &scripts, gameMode, 0) }
 			
-				if rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
-					fmt.Println("G released on GAME_OVER! Play Again!")
+			if isAllAnimUpdated {
+				if !willReplay {
+					if gameClearFrame < BOARD_SIZE {
+						anim := resqued[gameClearFrame]
+						jumpAnimal(anim, anim.pos, 18, 10)
+					}
+					gameClearFrame++
+					if gameClearFrame >= BOARD_SIZE { gameClearFrame = 0 }
+				} else {
 					resetState(&animals, &board, &resqued, &frontRowPos)
+				    time.Sleep(time.Millisecond * 500)
 					gameMode = OPENING
+					willReplay = false
 					msg = Message{}
 					numAnimalLeft = BOARD_SIZE
 					resquableIndex = [NUM_COL]int{}
@@ -728,21 +739,33 @@ func main() {
 					mostRecentResqueType = u8(0xFF)  
 					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 				}
+			}
+				
+			if !willReplay && rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+			    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
+				fmt.Println("G released on GAME_OVER! Play Again!")
+				for _, anim := range resqued { 
+					jumpAnimal(anim, Vec2{anim.pos.X, -ANIM_SIZE} , 24, 20)
+				}
+				willReplay = true
 			}
 
 		    case GAME_OVER:
 			
-			if msg.mode != gameMode {
-			    scripts.currMsgNum = 0
-			    setNextMsg(&msg, &scripts, gameMode)
-			}
+			if msg.mode != gameMode { setMsg(&msg, &scripts, gameMode, 0) }
+
 			if isAllAnimUpdated {
-			
-				if rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
-				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
-					fmt.Println("G released on GAME_OVER! Play Again!")
+				if !willReplay {
+					for i := 0; i < BOARD_SIZE; i++ {
+						if board[i] != nil && board[i].height >= MIN_ANIM_HEIGHT*5 { 
+							board[i].height -= 1 
+						}
+					}
+				} else {
 					resetState(&animals, &board, &resqued, &frontRowPos)
+				    time.Sleep(time.Millisecond * 500)
 					gameMode = OPENING
+					willReplay = false
 					msg = Message{}
 					numAnimalLeft = BOARD_SIZE
 					resquableIndex = [NUM_COL]int{}
@@ -750,11 +773,23 @@ func main() {
 					mostRecentResqueType = u8(0xFF)  
 					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
 				}
-			}
+            }
+
+				if !willReplay && rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
+				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
+					fmt.Println("G released on GAME_OVER! Play Again!")
+					for _, anim := range board { 
+						if anim != nil {jumpAnimal(anim, Vec2{anim.pos.X, -ANIM_SIZE}, 24, 20)}
+					}
+					for _, anim := range resqued { 
+						if anim != nil {jumpAnimal(anim, Vec2{anim.pos.X, -ANIM_SIZE}, 24, 20)}
+					}
+					willReplay = true
+				}
 		}
 
 		isAllAnimUpdated = updateAnimState(&animals, &board, &resqued, &frontRowPos, 
-		                                   &numAnimalLeft, &resquedChanged, &bigJumpMade)
+		                                   &numAnimalLeft, &resquedChanged, &bigJumpMade, gameMode)
 
         rl.BeginDrawing()
         {
