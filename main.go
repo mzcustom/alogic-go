@@ -41,6 +41,10 @@ const (
 	MARGIN_HEIGHT     = 20
 	MARGIN_WIDTH      = 20
 	MSG_BOARD_HEIGHT  = 40
+	TITLE_WIDTH		  = WINDOW_WIDTH*0.75
+	TITLE_HEIGHT	  = WINDOW_HEIGHT*0.2
+	MIN_TITLE_HEIGHT  = TITLE_HEIGHT*0.5
+	TITLE_LANDING_Y   = MARGIN_HEIGHT + ROW_HEIGHT
 	NUM_ROW           = 4
 	NUM_COL           = 4
 	ROW_HEIGHT        = (UPPER_LAND_HEIGHT - 2 * MARGIN_HEIGHT) / NUM_ROW 
@@ -107,6 +111,19 @@ type Scripts struct {
 	msgs [NUM_GAME_MODE][]Message
 }
 
+type TitleLogo struct {
+	pos Vec2
+	dest Vec2
+	accel Vec2
+	veloc Vec2
+	scale f32
+	height f32
+	press f32
+	totalJumpFrames u8
+	ascFrames u8
+	currJumpFrame u8
+}
+
 // accel, veloc and press in pixels/frame.
 type Animal struct {
 	pos Vec2
@@ -140,6 +157,72 @@ func setAnimals(animals *[BOARD_SIZE]Animal) {
 		kind = 1
 		color <<= 1
 	}
+}
+
+func setTitleLogo(title *TitleLogo) {
+	title.pos.X = (WINDOW_WIDTH - TITLE_WIDTH)*0.5
+	title.pos.Y = -TITLE_HEIGHT
+	title.height = TITLE_HEIGHT
+	title.dest = Vec2{title.pos.X, TITLE_LANDING_Y} 
+}
+
+func updateTitle(title *TitleLogo) bool {
+	isUpdated := true
+
+	if title.press > 0 {
+		isUpdated = false
+		title.height -= title.press 	
+		if title.height < MIN_TITLE_HEIGHT {
+			title.height = MIN_TITLE_HEIGHT
+			title.press = -1
+		} else {
+			title.press /= 1.75
+			if title.press < 0.0001 {
+				title.press = -1
+			}
+		}
+	}
+	if title.press < 0 {
+		isUpdated = false
+		title.height -= title.press 	
+		if title.height >= TITLE_HEIGHT {
+			title.height = TITLE_HEIGHT
+			title.press = 0
+		} else {
+			title.press *= 1.75
+		}
+	}
+
+	// Update Pos and Veloc if it's moving or has accel
+	if ((title.veloc != Vec2{}) || (title.accel != Vec2{})) && title.press == 0 {
+		isUpdated = false
+		pos := title.pos
+		veloc := title.veloc
+		title.pos = Vec2Add(pos, veloc)
+		title.veloc = Vec2Add(title.veloc, title.accel)
+	     
+		// take care of landing
+		if title.veloc.Y > 0 && Vec2DistSq(title.pos, title.dest) < Vec2LenSq(title.veloc) / 2 {
+		    title.press = title.veloc.Y/2
+		    title.pos = title.dest
+			if title.veloc.Y >= 2 {
+		        title.veloc = Vec2{0, -title.veloc.Y/2} 
+			} else {
+				title.press = 0
+				title.veloc = Vec2{}
+				title.accel = Vec2{}
+			}
+		}
+	}
+	return isUpdated
+}
+
+func drawTitle(titleTexture *rl.Texture2D, title *TitleLogo) {
+	
+    srcRect := rl.Rectangle{0, 0, TITLE_WIDTH , TITLE_HEIGHT}
+	desPos := Vec2{title.pos.X, title.pos.Y + TITLE_HEIGHT - title.height}
+	desRect := rl.Rectangle{desPos.X, desPos.Y, TITLE_WIDTH, title.height}
+	rl.DrawTexturePro(*titleTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
 }
 
 func shuffleBoard(board *[BOARD_SIZE]*Animal, frontRowPos *[NUM_COL]Vec2) {
@@ -323,18 +406,22 @@ func isAnimRectClicked(animal *Animal) bool {
 		   mouseY >= animPosY - halfLength && mouseY <= animPosY + halfLength   
 }
 
-func loadTextures(groundTexture, animalsTexture, dustTexture *rl.Texture2D) {
+func loadTextures(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Texture2D) {
+    titleImage := rl.LoadImage("textures/title.png")
     groundImage := rl.LoadImage("textures/background.png")
     animalsImage := rl.LoadImage("textures/animals.png")
     dustImage := rl.LoadImage("textures/dust.png")
     
+	rl.ImageResize(titleImage, TITLE_WIDTH, TITLE_HEIGHT)
 	rl.ImageResize(groundImage, WINDOW_WIDTH, WINDOW_HEIGHT)
     rl.ImageResize(animalsImage, i32(ANIM_SIZE * NUM_COL), i32(ANIM_SIZE * NUM_ROW))
 
+    *titleTexture = rl.LoadTextureFromImage(titleImage)
     *groundTexture = rl.LoadTextureFromImage(groundImage)
     *animalsTexture = rl.LoadTextureFromImage(animalsImage)
     *dustTexture = rl.LoadTextureFromImage(dustImage)
     
+	rl.UnloadImage(titleImage)
 	rl.UnloadImage(groundImage)
     rl.UnloadImage(animalsImage)
     rl.UnloadImage(dustImage)
@@ -499,10 +586,9 @@ func resetState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*Animal
 	}
 
 	shuffleBoard(board, frontRowPos)
-	printbd(board)
+	//printbd(board)
 
 	*resqued = [BOARD_SIZE]*Animal{}
-	printbd(resqued)
 }
 
 func processKeyDown(anim *Animal) {
@@ -531,13 +617,44 @@ func setMsg(msg *Message, scr *Scripts, mode GameMode, msgNum int) {
 	}
 }
 
+type TitleState struct {
+	destForOpening [3]Vec2
+	animToDrop int
+	titleDropFrame int
+	firstCompressFrame int
+	lastAnimDropFrame int
+	titlePressFrame int
+	lastAnimJumpFrame int
+	secondCompressFrame int
+	fallOutFrame int
+	sceneEnd bool
+}
+
+func setTitleAnims(titleAnims *[3]*Animal, tstate *TitleState) {
+	for i := 0; i < 3; i++ {
+	    tstate.destForOpening[i] = titleAnims[i].dest 
+	}
+
+	titleAnims[0].dest = Vec2{WINDOW_WIDTH/4*3, TITLE_LANDING_Y + TITLE_HEIGHT - ANIM_SIZE/3} 
+	titleAnims[1].dest = Vec2{WINDOW_WIDTH/4*1.5, TITLE_LANDING_Y + TITLE_HEIGHT - ANIM_SIZE/3} 
+	titleAnims[2].dest = Vec2{WINDOW_WIDTH/2, TITLE_LANDING_Y - TITLE_HEIGHT/4 + ANIM_SIZE/2} 
+}
+
 func main() {
+
+	title := TitleLogo{}
+	setTitleLogo(&title)
 
 	animals := [BOARD_SIZE]Animal{}
 	board := [BOARD_SIZE]*Animal{}
 	resqued := [BOARD_SIZE]*Animal{}
 	frontRowPos := [NUM_COL]Vec2{}
 	resetState(&animals, &board, &resqued, &frontRowPos)
+
+	tstate := TitleState{}
+	firstRow := BOARD_SIZE - NUM_COL
+	titleAnims :=[3]*Animal{board[firstRow], board[firstRow+2], board[firstRow+1]}
+	setTitleAnims(&titleAnims, &tstate) 
 
 	msg := Message{}
 	scripts := Scripts{}
@@ -553,9 +670,12 @@ func main() {
 
 	numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
+	isTitleUpdated := true
 	isAllAnimUpdated := true
 	isQuitting := false
-	gameMode := OPENING 
+	gameMode := TITLE 
+	//gameMode := OPENING 
+	titleFrame := 0
 	openingFrame := 0
     gameClearFrame := 0
 	willReplay := false
@@ -569,8 +689,8 @@ func main() {
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
     rl.SetTargetFPS(FPS)
 
-	var groundTexture, animalsTexture, dustTexture rl.Texture2D
-	loadTextures(&groundTexture, &animalsTexture, &dustTexture)
+	var titleTexture, groundTexture, animalsTexture, dustTexture rl.Texture2D
+	loadTextures(&titleTexture, &groundTexture, &animalsTexture, &dustTexture)
     
 	// game loop
     for !isQuitting && !rl.WindowShouldClose() {
@@ -585,9 +705,73 @@ func main() {
 
 	    switch gameMode {
 
-			case TITLE:	
+			case TITLE:
+	
+			if tstate.animToDrop < 2 && (titleFrame == 20 || titleFrame == 40) { 
+				anim := titleAnims[tstate.animToDrop]
+				jumpAnimal(anim, anim.dest, 20, 7)
+				tstate.animToDrop++
+				if tstate.animToDrop == 2 { 
+					tstate.titleDropFrame = titleFrame + FPS 
+				}
+			}
+			if tstate.animToDrop == 2 && titleFrame == tstate.titleDropFrame { 
+				title.accel = Vec2{0, 1}
+				tstate.firstCompressFrame = titleFrame + 0.4*FPS
+			}
+			if tstate.animToDrop == 2 && titleFrame == tstate.firstCompressFrame {
+				anim0, anim1 := titleAnims[0], titleAnims[1] 
+				anim0.press = ANIM_SIZE*0.75
+				anim0.veloc = Vec2{15, 0}
+				anim0.accel = Vec2{-1.5, 0}
+				anim0.dest = Vec2{75 + anim0.pos.X, anim0.pos.Y}
+				anim1.dest = Vec2{anim1.pos.X - 125, anim1.pos.Y}
+				jumpAnimal(anim1, anim1.dest, 14, 8)
+				tstate.lastAnimDropFrame = titleFrame + 3*FPS
+			}
+			if tstate.animToDrop == 2 && titleFrame == tstate.lastAnimDropFrame {
+				anim := titleAnims[tstate.animToDrop]
+				jumpAnimal(anim, anim.dest, 20, 6)
+				tstate.titlePressFrame = titleFrame + 0.3*FPS	
+			}
+			if tstate.animToDrop == 2 && titleFrame == tstate.titlePressFrame {
+				title.press = 12.5
+				tstate.lastAnimJumpFrame = titleFrame + 0.2*FPS
+			}
+			if tstate.animToDrop == 2 && titleFrame == tstate.lastAnimJumpFrame {
+				anim := titleAnims[2]
+				jumpAnimal(anim, titleAnims[1].pos, 24, 11)
+				tstate.animToDrop++
+				tstate.secondCompressFrame = titleFrame + 24
+			}
+			if tstate.animToDrop == 3 && titleFrame == tstate.secondCompressFrame {
+				anim := titleAnims[1]
+				anim0 := titleAnims[0]
+				anim.press = ANIM_SIZE*0.75
+				anim.veloc = Vec2{30, 0}
+				anim.accel = Vec2{-1, 0}
+				anim.dest = Vec2{anim0.pos.X, anim.pos.Y}
+				tstate.fallOutFrame = titleFrame + 24
+			}
+			if tstate.animToDrop == 3 && titleFrame == tstate.fallOutFrame {
+				anim := titleAnims[0]
+				jumpAnimal(anim, Vec2{RESQUE_SPOT_X, RESQUE_SPOT_Y}, 26, 8)
+				tstate.sceneEnd = true
+			}
+			
+			isTitleUpdated = updateTitle(&title)
+			
+			if tstate.sceneEnd && isTitleUpdated && isAllAnimUpdated {
+			    if rl.IsKeyReleased(KEY_SPACE) || rl.IsMouseButtonReleased(MOUSE_LEFT) {
+					fmt.Println("Space released!")
+					for i := 0; i < 3; i++ {
+						titleAnims[i].dest = tstate.destForOpening[i]
+					}
+					gameMode = OPENING
+				}
+			}
 
-			fmt.Println("TITLE PAGE!!")
+			titleFrame++
 
 		    case OPENING:
 
@@ -595,7 +779,13 @@ func main() {
 			frameMod := openingFrame % 10
 			if frameDiv < BOARD_SIZE {
 				anim := &animals[frameDiv]
-				if frameMod == 0 { jumpAnimal(anim, anim.dest, 20, 4) }
+				if frameMod == 0 {
+					if anim == titleAnims[0] {
+						jumpAnimal(anim, anim.dest, 24, 16)
+					} else {
+					    jumpAnimal(anim, anim.dest, 20, 4)
+					}
+				}
 			    openingFrame++
 			} else if isAllAnimUpdated {
 				openingFrame = 0
@@ -793,55 +983,67 @@ func main() {
 
         rl.BeginDrawing()
         {
-
-            rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
-
-			for i := 0; i < BOARD_SIZE; i++ {
-                if board[i] != nil {
-                    drawAnimal(&animalsTexture, &dustTexture, board[i])
-                }
-            }
+			rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
 			
-			for i := 0; i < BOARD_SIZE - numAnimalLeft; i++ {
-                if resqued[i] != nil {
-                    drawAnimal(&animalsTexture, &dustTexture, resqued[i])
-                }
-            }
+			if gameMode == TITLE {
 				
-			if gameMode == msg.mode {
-				fontColor := rl.Gold
-				if msg.duration == INDEFINITE {
-					if msg.frames < FPS*3 {
-						alpha := (msg.frames*2 % 255*2) 
-						if alpha > 255 { alpha = 255*2 - alpha }
-						msg.alpha = u8(alpha)
-					} else if msg.alpha <= 253 {
-					    msg.alpha += 2
+				drawTitle(&titleTexture, &title)
+				for _, anim := range titleAnims {
+					drawAnimal(&animalsTexture, &dustTexture, anim)
+				}
+
+			} else {
+
+				rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
+
+				for i := 0; i < BOARD_SIZE; i++ {
+					if board[i] != nil {
+						drawAnimal(&animalsTexture, &dustTexture, board[i])
 					}
-				} else {
-					if msg.frames <= msg.duration {
-						alpha := (msg.frames*2 % 255*2) 
-						if alpha > 255 { alpha = 255*2 - alpha }
-						msg.alpha = u8(alpha)
+				}
+				
+				for i := 0; i < BOARD_SIZE - numAnimalLeft; i++ {
+					if resqued[i] != nil {
+						drawAnimal(&animalsTexture, &dustTexture, resqued[i])
+					}
+				}
+					
+				if gameMode == msg.mode {
+					fontColor := rl.Gold
+					if msg.duration == INDEFINITE {
+						if msg.frames < FPS*3 {
+							alpha := (msg.frames*2 % 255*2) 
+							if alpha > 255 { alpha = 255*2 - alpha }
+							msg.alpha = u8(alpha)
+						} else if msg.alpha <= 253 {
+							msg.alpha += 2
+						}
 					} else {
-						if msg.alpha <= 1 {
-							msg.alpha = 0
+						if msg.frames <= msg.duration {
+							alpha := (msg.frames*2 % 255*2) 
+							if alpha > 255 { alpha = 255*2 - alpha }
+							msg.alpha = u8(alpha)
 						} else {
-							msg.alpha -= 2
+							if msg.alpha <= 1 {
+								msg.alpha = 0
+							} else {
+								msg.alpha -= 2
+							}
 						}
 					}
-				}
-				fontColor.A = u8(msg.alpha)
+					fontColor.A = u8(msg.alpha)
 
-                if msg.l2 == "" {
-				    rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
-				} else {
-				    rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
-					            DEFAULT_FONT_SIZE, fontColor)
-				    rl.DrawText(msg.l2, 0, MSG_POS_Y + DEFAULT_FONT_SIZE/2, 
-					            DEFAULT_FONT_SIZE, fontColor)
+					if msg.l2 == "" {
+						rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
+					} else {
+						rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
+									DEFAULT_FONT_SIZE, fontColor)
+						rl.DrawText(msg.l2, 0, MSG_POS_Y + DEFAULT_FONT_SIZE/2, 
+									DEFAULT_FONT_SIZE, fontColor)
+					}
 				}
 			}
+
         }
         rl.EndDrawing()
     }
