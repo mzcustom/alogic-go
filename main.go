@@ -107,7 +107,7 @@ type Message struct {
 }
 
 type Scripts struct {
-	currMsgNum int
+	//currMsgNum int
 	msgs [NUM_GAME_MODE][]Message
 }
 
@@ -122,6 +122,20 @@ type TitleLogo struct {
 	totalJumpFrames u8
 	ascFrames u8
 	currJumpFrame u8
+}
+
+type TitleState struct {
+	destForOpening [3]Vec2
+	animToDrop int
+	titleDropFrame int
+	firstCompressFrame int
+	lastAnimDropFrame int
+	titlePressFrame int
+	lastAnimJumpFrame int
+	secondCompressFrame int
+	fallOutFrame int
+	titleMessageShown bool
+	sceneEnd bool
 }
 
 // accel, veloc and press in pixels/frame.
@@ -617,19 +631,6 @@ func setMsg(msg *Message, scr *Scripts, mode GameMode, msgNum int) {
 	}
 }
 
-type TitleState struct {
-	destForOpening [3]Vec2
-	animToDrop int
-	titleDropFrame int
-	firstCompressFrame int
-	lastAnimDropFrame int
-	titlePressFrame int
-	lastAnimJumpFrame int
-	secondCompressFrame int
-	fallOutFrame int
-	sceneEnd bool
-}
-
 func setTitleAnims(titleAnims *[3]*Animal, tstate *TitleState) {
 	for i := 0; i < 3; i++ {
 	    tstate.destForOpening[i] = titleAnims[i].dest 
@@ -658,6 +659,7 @@ func main() {
 
 	msg := Message{}
 	scripts := Scripts{}
+	addMsg(&scripts, INDEFINITE, TITLE, "Press Space or Click anywhere to play", "")
 	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Pick one from the front row carefully", 
 	       "The following has to be same kind or color")
 	addMsg(&scripts, INDEFINITE, GAME_PLAY, "Press and hold for SUPER JUMP", "")
@@ -667,6 +669,7 @@ func main() {
 	       "Press G or click the last one to play again!")
 	addMsg(&scripts, INDEFINITE, GAME_OVER, "Oops, it's a dead-end!", 
 	       "Press G or click the last one to try again!")
+	msg.mode = TITLE
 
 	numAnimalLeft := BOARD_SIZE
     resquableIndex := [NUM_COL]int{}
@@ -674,7 +677,6 @@ func main() {
 	isAllAnimUpdated := true
 	isQuitting := false
 	gameMode := TITLE 
-	//gameMode := OPENING 
 	titleFrame := 0
 	openingFrame := 0
     gameClearFrame := 0
@@ -762,6 +764,10 @@ func main() {
 			isTitleUpdated = updateTitle(&title)
 			
 			if tstate.sceneEnd && isTitleUpdated && isAllAnimUpdated {
+				if !tstate.titleMessageShown {
+					setMsg(&msg, &scripts, gameMode, 0)
+					tstate.titleMessageShown = true
+				}
 			    if rl.IsKeyReleased(KEY_SPACE) || rl.IsMouseButtonReleased(MOUSE_LEFT) {
 					fmt.Println("Space released!")
 					for i := 0; i < 3; i++ {
@@ -795,7 +801,10 @@ func main() {
 		    case GAME_PLAY:
 
 			if isAllAnimUpdated {
-				if msg.mode != gameMode { msg.mode = gameMode }
+				if msg.mode != gameMode { 
+					msg.mode = gameMode
+					msg.frames = 0
+				}
 
 				if !firstMoveMade && msg.frames == 0 {
 					setMsg(&msg, &scripts, gameMode, 0)
@@ -994,7 +1003,7 @@ func main() {
 
 			} else {
 
-				rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
+				//rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
 
 				for i := 0; i < BOARD_SIZE; i++ {
 					if board[i] != nil {
@@ -1007,43 +1016,41 @@ func main() {
 						drawAnimal(&animalsTexture, &dustTexture, resqued[i])
 					}
 				}
-					
-				if gameMode == msg.mode {
-					fontColor := rl.Gold
-					if msg.duration == INDEFINITE {
-						if msg.frames < FPS*3 {
-							alpha := (msg.frames*2 % 255*2) 
-							if alpha > 255 { alpha = 255*2 - alpha }
-							msg.alpha = u8(alpha)
-						} else if msg.alpha <= 253 {
-							msg.alpha += 2
-						}
-					} else {
-						if msg.frames <= msg.duration {
-							alpha := (msg.frames*2 % 255*2) 
-							if alpha > 255 { alpha = 255*2 - alpha }
-							msg.alpha = u8(alpha)
-						} else {
-							if msg.alpha <= 1 {
-								msg.alpha = 0
-							} else {
-								msg.alpha -= 2
-							}
-						}
+			}	
+			if gameMode == msg.mode {
+				fontColor := rl.Gold
+				if msg.duration == INDEFINITE {
+					if msg.frames < FPS*3 {
+						alpha := (msg.frames*2 % 255*2) 
+						if alpha > 255 { alpha = 255*2 - alpha }
+						msg.alpha = u8(alpha)
+					} else if msg.alpha <= 253 {
+						msg.alpha += 2
 					}
-					fontColor.A = u8(msg.alpha)
-
-					if msg.l2 == "" {
-						rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
+				} else {
+					if msg.frames <= msg.duration {
+						alpha := (msg.frames*2 % 255*2) 
+						if alpha > 255 { alpha = 255*2 - alpha }
+						msg.alpha = u8(alpha)
 					} else {
-						rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
-									DEFAULT_FONT_SIZE, fontColor)
-						rl.DrawText(msg.l2, 0, MSG_POS_Y + DEFAULT_FONT_SIZE/2, 
-									DEFAULT_FONT_SIZE, fontColor)
+						if msg.alpha <= 1 {
+							msg.alpha = 0
+						} else {
+							msg.alpha -= 2
+						}
 					}
 				}
-			}
+				fontColor.A = u8(msg.alpha)
 
+				if msg.l2 == "" {
+					rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
+				} else {
+					rl.DrawText(msg.l1, 0, MSG_POS_Y - DEFAULT_FONT_SIZE/2,
+								DEFAULT_FONT_SIZE, fontColor)
+					rl.DrawText(msg.l2, 0, MSG_POS_Y + DEFAULT_FONT_SIZE/2, 
+								DEFAULT_FONT_SIZE, fontColor)
+				}
+			}
         }
         rl.EndDrawing()
     }
