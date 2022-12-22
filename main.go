@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"time"
+	"reflect"
 )
 
 type i64  = int64
@@ -136,6 +137,11 @@ type TitleState struct {
 	fallOutFrame int
 	titleMessageShown bool
 	sceneEnd bool
+}
+
+type Sounds struct {
+	jumpSound rl.Sound
+	bigJumpSound rl.Sound
 }
 
 // accel, veloc and press in pixels/frame.
@@ -420,11 +426,12 @@ func isAnimRectClicked(animal *Animal) bool {
 		   mouseY >= animPosY - halfLength && mouseY <= animPosY + halfLength   
 }
 
-func loadTextures(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Texture2D) {
-    titleImage := rl.LoadImage("textures/title.png")
-    groundImage := rl.LoadImage("textures/background.png")
-    animalsImage := rl.LoadImage("textures/animals.png")
-    dustImage := rl.LoadImage("textures/dust.png")
+func loadAssets(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Texture2D,
+                  sounds *Sounds) {
+    titleImage := rl.LoadImage("assets/textures/title.png")
+    groundImage := rl.LoadImage("assets/textures/background.png")
+    animalsImage := rl.LoadImage("assets/textures/animals.png")
+    dustImage := rl.LoadImage("assets/textures/dust.png")
     
 	rl.ImageResize(titleImage, TITLE_WIDTH, TITLE_HEIGHT)
 	rl.ImageResize(groundImage, WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -439,6 +446,17 @@ func loadTextures(titleTexture, groundTexture, animalsTexture, dustTexture *rl.T
 	rl.UnloadImage(groundImage)
     rl.UnloadImage(animalsImage)
     rl.UnloadImage(dustImage)
+
+	sounds.jumpSound = rl.LoadSound("assets/sounds/jump.wav")
+	sounds.bigJumpSound = rl.LoadSound("assets/sounds/bigjump.wav")
+}
+
+func unloadAssets(sounds *Sounds) {
+    s := reflect.ValueOf(sounds)
+
+	for i := 0; i < s.NumField(); i++ {
+		rl.UnloadSound(s.Field(i).Interface().(rl.Sound))
+    }
 }
 
 func findLastRowEmpties(board *[BOARD_SIZE]*Animal, empties *[NUM_COL]bool) int {
@@ -690,9 +708,11 @@ func main() {
 
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
     rl.SetTargetFPS(FPS)
+	rl.InitAudioDevice();
 
 	var titleTexture, groundTexture, animalsTexture, dustTexture rl.Texture2D
-	loadTextures(&titleTexture, &groundTexture, &animalsTexture, &dustTexture)
+	var sounds Sounds
+	loadAssets(&titleTexture, &groundTexture, &animalsTexture, &dustTexture, &sounds)
     
 	// game loop
     for !isQuitting && !rl.WindowShouldClose() {
@@ -1054,4 +1074,6 @@ func main() {
         }
         rl.EndDrawing()
     }
+	
+	unloadAssets(&sounds)
 }
