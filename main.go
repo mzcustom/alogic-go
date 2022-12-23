@@ -1,15 +1,19 @@
 package main
 
 import (
-	"fmt"
 	"github.com/gen2brain/raylib-go/raylib"
+	"fmt"
 	"crypto/rand"
-	"math"
 	"math/big"
 	"time"
 	"reflect"
 )
 
+// Change _DEBUG to 1 to print debug infos to the console
+const _DEBUG = 0
+const DEBUG = _DEBUG == 1
+
+// type alias
 type i64  = int64
 type i32  = int32 
 type f64  = float64
@@ -17,24 +21,18 @@ type f32  = float32
 type u8   = uint8
 type Vec2 = rl.Vector2
 
+// Vec2 math
 func Vec2Add(v1, v2 Vec2) Vec2 { return Vec2{v1.X + v2.X, v1.Y + v2.Y} }
-
 func Vec2Sub(v1, v2 Vec2) Vec2 { return Vec2{v1.X - v2.X, v1.Y - v2.Y} }
-
 func Vec2Div(v Vec2, f f32) Vec2 { return Vec2{v.X / f, v.Y / f} }
-
 func Vec2Neg(v Vec2) Vec2 { return Vec2{-v.X, -v.Y} }
-
 func Vec2LenSq(v Vec2) f32 { return v.X * v.X + v.Y * v.Y }
-
-func Vec2Len(v Vec2) f64 { return math.Sqrt(f64(Vec2LenSq(v))) }
-
 func Vec2DistSq(v1, v2 Vec2) f32 { return Vec2LenSq(Vec2Sub(v1, v2)) }
 
-func Vec2Dist(v1, v2 Vec2) f64 { return math.Sqrt(f64(Vec2DistSq(v1, v2))) }
-
+// Assert
 func assert(b bool, msg string) { if !b { panic("Assert failed: " + msg + "!\n") } }
 
+// Constants
 const (
 	WINDOW_WIDTH      = 560
 	WINDOW_HEIGHT     = 800
@@ -90,6 +88,7 @@ const (
 	KEY_UP = 265
 )
 
+// GameMode Enums
 type GameMode u8
 const (
 	TITLE GameMode = iota + 1
@@ -99,46 +98,12 @@ const (
     GAME_OVER
 )
 
-type Message struct {
-	l1 string
-	l2 string
-	duration int
-	frames int
-	displayed bool
-	alpha u8
-	gameMode GameMode
-}
-
-type Scripts struct {
-	msgs [NUM_GAME_MODE][]Message
-}
-
-type TitleLogo struct {
-	pos Vec2
-	dest Vec2
-	accel Vec2
-	veloc Vec2
-	scale f32
-	height f32
-	press f32
-	totalJumpFrames u8
-	ascFrames u8
-	currJumpFrame u8
-}
-
-type TitleState struct {
-	destForOpening [3]Vec2
-    titleFrame int
-	animToDrop int
-	titleDropFrame int
-	firstCompressFrame int
-	lastAnimDropFrame int
-	titlePressFrame int
-	lastAnimJumpFrame int
-	secondCompressFrame int
-	fallOutFrame int
-	titleMessageShown bool
-	sceneEnd bool
+// Asset structs
+type Textures struct {
+    TitleTexture rl.Texture2D
+    GroundTexture rl.Texture2D
+    AnimalsTexture rl.Texture2D
+    DustTexture rl.Texture2D
 }
 
 type Sounds struct {
@@ -156,7 +121,47 @@ type Sounds struct {
 	Yay rl.Sound
 }
 
+// Message board system
+type Message struct {
+	l1 string
+	l2 string
+	duration int
+	frames int
+	displayed bool
+	alpha u8
+	gameMode GameMode
+}
+
+type Scripts struct {
+	msgs [NUM_GAME_MODE][]Message
+}
+
+// TITLE GameMode states
+type TitleState struct {
+	destForOpening [3]Vec2
+    titleFrame int
+	animToDrop int
+	titleDropFrame int
+	firstCompressFrame int
+	lastAnimDropFrame int
+	titlePressFrame int
+	lastAnimJumpFrame int
+	secondCompressFrame int
+	fallOutFrame int
+	titleMessageShown bool
+	sceneEnd bool
+}
+
 // accel, veloc and press in pixels/frame.
+type TitleLogo struct {
+	pos Vec2
+	dest Vec2
+	accel Vec2
+	veloc Vec2
+	height f32
+	press f32
+}
+
 type Animal struct {
 	pos Vec2
 	dest Vec2
@@ -174,27 +179,35 @@ type Animal struct {
 }
 
 // Global Variables
-// var textures Textures  
+var textures Textures  
 var sounds Sounds  
 var gameMode GameMode
 var msg Message
 var scripts Scripts
 
-func setAnimals(animals *[BOARD_SIZE]Animal) {
-	color, kind := u8(1), u8(1)
-
+// For DEBUG
+func printbd (board *[BOARD_SIZE]*Animal) {
 	for row := 0; row < NUM_ROW; row++ {
-		colorBit := color << NUM_KIND
 		for col := 0; col < NUM_COL; col++ {
-			boardIndex := row * NUM_COL + col
-			animals[boardIndex].height = ANIM_SIZE 
-			animals[boardIndex].animType = colorBit | kind
-			animals[boardIndex].scale = 1
-			kind <<= 1
+			anim := board[row*NUM_COL + col]
+			if anim == nil { 
+				fmt.Printf("00000000 ") 
+			} else { 
+				fmt.Printf("%08b ", anim.animType)
+			}
 		}
-		kind = 1
-		color <<= 1
+		fmt.Printf("\n")
 	}
+}
+
+func findFirst1Bit(target u8) int {
+    var order int
+	b := u8(1)
+    for target & b == 0 { 
+        b <<= 1
+        order++
+    }
+    return order
 }
 
 func setTitleLogo(title *TitleLogo) {
@@ -255,12 +268,28 @@ func updateTitle(title *TitleLogo) bool {
 	return isUpdated
 }
 
-func drawTitle(titleTexture *rl.Texture2D, title *TitleLogo) {
-	
+func drawTitle(title *TitleLogo) {
     srcRect := rl.Rectangle{0, 0, TITLE_WIDTH , TITLE_HEIGHT}
 	desPos := Vec2{title.pos.X, title.pos.Y + TITLE_HEIGHT - title.height}
 	desRect := rl.Rectangle{desPos.X, desPos.Y, TITLE_WIDTH, title.height}
-	rl.DrawTexturePro(*titleTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+	rl.DrawTexturePro(textures.TitleTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+}
+
+func setAnimals(animals *[BOARD_SIZE]Animal) {
+	color, kind := u8(1), u8(1)
+
+	for row := 0; row < NUM_ROW; row++ {
+		colorBit := color << NUM_KIND
+		for col := 0; col < NUM_COL; col++ {
+			boardIndex := row * NUM_COL + col
+			animals[boardIndex].height = ANIM_SIZE 
+			animals[boardIndex].animType = colorBit | kind
+			animals[boardIndex].scale = 1
+			kind <<= 1
+		}
+		kind = 1
+		color <<= 1
+	}
 }
 
 func shuffleBoard(board *[BOARD_SIZE]*Animal, frontRowPos *[NUM_COL]Vec2) {
@@ -287,19 +316,8 @@ func shuffleBoard(board *[BOARD_SIZE]*Animal, frontRowPos *[NUM_COL]Vec2) {
 	}
 }
 
-func findFirst1Bit(target u8) int {
-    var order int
-	b := u8(1)
-    for target & b == 0 { 
-        b <<= 1
-        order++
-    }
-    return order
-}
-
 // Returns the number of animals that could be chosen from the front row(last NUM_COL elements of 
 // the board) and fills the nextAnimIndexes array with the indexes of them
-
 func findResquables(board *[BOARD_SIZE]*Animal, mostRecentRescuedType u8,
 					nextAnimIndexes *[NUM_COL]int) int {
     var nextAnimNum int
@@ -360,8 +378,7 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
 	} else {
 		diff = dest.Y - anim.pos.Y
 	}
-	anim.accel = Vec2{0, 
-	                  2*diff/(desFrames*desFrames - ascFrames*ascFrames) }
+	anim.accel = Vec2{0, 2*diff/(desFrames*desFrames - ascFrames*ascFrames) }
 	anim.veloc = Vec2{(dest.X-anim.pos.X)/totalFrames, -anim.accel.Y*ascFrames}
 	anim.dest = dest
 	anim.totalJumpFrames = u8(totalFrames)
@@ -379,7 +396,7 @@ func jumpAnimal(anim *Animal, dest Vec2, totalFrames, ascFrames f32) {
     }
 }
 
-func drawAnimal(animalsTexture, dustTexture *rl.Texture2D, anim *Animal) {
+func drawAnimal(anim *Animal) {
 	colorBitfield := anim.animType >> NUM_KIND
 	kindBitfield := anim.animType & 0b1111
 	colorOffset := NUM_COLOR - 1 - findFirst1Bit(colorBitfield)
@@ -405,35 +422,22 @@ func drawAnimal(animalsTexture, dustTexture *rl.Texture2D, anim *Animal) {
 	desPos := Vec2{animOrigin.X, animOrigin.Y + sc*ANIM_SIZE - sc*anim.height}
 	desRect := rl.Rectangle{desPos.X, desPos.Y, sc*ANIM_SIZE, sc*anim.height}
 
-	rl.DrawTexturePro(*animalsTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+	rl.DrawTexturePro(textures.AnimalsTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
 	
 	// Draw dust
 	if anim.dustDuration != 0 { 
 		srcRect := rl.Rectangle{0, 0, DUST_IMAGE_WIDTH, DUST_IMAGE_HEIGHT}
 		desRect := rl.Rectangle{anim.pos.X - ANIM_SIZE*0.7, anim.pos.Y + ANIM_SIZE*0.4, 
 								ANIM_SIZE*0.5, ANIM_SIZE*0.15} 
-		rl.DrawTexturePro(*dustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+		rl.DrawTexturePro(textures.DustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
 
 		desRect = rl.Rectangle{anim.pos.X + ANIM_SIZE*0.2, anim.pos.Y + ANIM_SIZE*0.4,  
 								ANIM_SIZE*0.5, ANIM_SIZE*0.15} 
-		rl.DrawTexturePro(*dustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
+		rl.DrawTexturePro(textures.DustTexture, srcRect, desRect, Vec2{}, 0, rl.RayWhite)
 		anim.dustDuration -= 1
 	}
 }
 
-func printbd (board *[BOARD_SIZE]*Animal) {
-	for row := 0; row < NUM_ROW; row++ {
-		for col := 0; col < NUM_COL; col++ {
-			anim := board[row*NUM_COL + col]
-			if anim == nil { 
-				fmt.Printf("00000000 ") 
-			} else { 
-				fmt.Printf("%08b ", anim.animType)
-			}
-		}
-		fmt.Printf("\n")
-	}
-}
 
 func isAnimRectClicked(animal *Animal) bool {
 	if animal == nil { return false}
@@ -444,15 +448,16 @@ func isAnimRectClicked(animal *Animal) bool {
 	animPosY := animal.pos.Y
 	halfLength := ANIM_SIZE / 2
 
-	//fmt.Printf("Mouse Clicked at : %d, %d\n", mouseX, mouseY)
-	//fmt.Printf("AnimPos : %d, %d\n", animPosX, animPosY)
+	if DEBUG {
+	    fmt.Printf("Mouse Clicked at : %d, %d\n", mouseX, mouseY)
+	    fmt.Printf("AnimPos : %d, %d\n", animPosX, animPosY)
+	}
 
 	return mouseX >= animPosX - halfLength && mouseX <= animPosX + halfLength &&
 		   mouseY >= animPosY - halfLength && mouseY <= animPosY + halfLength   
 }
 
-func loadAssets(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Texture2D,
-                  sounds *Sounds) {
+func loadAssets() {
     titleImage := rl.LoadImage("assets/textures/title.png")
     groundImage := rl.LoadImage("assets/textures/background.png")
     animalsImage := rl.LoadImage("assets/textures/animals.png")
@@ -462,10 +467,10 @@ func loadAssets(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Tex
 	rl.ImageResize(groundImage, WINDOW_WIDTH, WINDOW_HEIGHT)
     rl.ImageResize(animalsImage, i32(ANIM_SIZE * NUM_COL), i32(ANIM_SIZE * NUM_ROW))
 
-    *titleTexture = rl.LoadTextureFromImage(titleImage)
-    *groundTexture = rl.LoadTextureFromImage(groundImage)
-    *animalsTexture = rl.LoadTextureFromImage(animalsImage)
-    *dustTexture = rl.LoadTextureFromImage(dustImage)
+    textures.TitleTexture = rl.LoadTextureFromImage(titleImage)
+    textures.GroundTexture = rl.LoadTextureFromImage(groundImage)
+    textures.AnimalsTexture = rl.LoadTextureFromImage(animalsImage)
+    textures.DustTexture = rl.LoadTextureFromImage(dustImage)
     
 	rl.UnloadImage(titleImage)
 	rl.UnloadImage(groundImage)
@@ -485,9 +490,8 @@ func loadAssets(titleTexture, groundTexture, animalsTexture, dustTexture *rl.Tex
 	sounds.Fail = rl.LoadSound("assets/sounds/fail.mp3")
 }
 
-func unloadAssets(sounds *Sounds) {
-    s := reflect.ValueOf(*sounds)
-
+func unloadSounds() {
+    s := reflect.ValueOf(sounds)
 	for i := 0; i < s.NumField(); i++ {
 		rl.UnloadSound(s.Field(i).Interface().(rl.Sound))
     }
@@ -612,8 +616,7 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
 				lastResquedIndex := BOARD_SIZE - 1 - *numAnimalLeft
 				if gameMode == GAME_PLAY && lastResquedIndex > 0 && 
 				   anim == resqued[lastResquedIndex] {
-					// if the landing veloc is great, send previously resqued animals
-					// back to the land above the bridge
+					// when a big jump is made, send previously resqued animals back to the land
 				    if anim.veloc.Y > FPS && *bigJumpLeft > 0 {
                         *bigJumpMade = true
                         scatterResqued(board, resqued, lastResquedIndex - 1, frontRowPos,
@@ -622,8 +625,7 @@ func updateAnimState(animals *[BOARD_SIZE]Animal, board, resqued *[BOARD_SIZE]*A
                         if lastMsgShown && *bigJumpLeft == 1 { setMsg(GAME_PLAY, 3) }
                         if *bigJumpLeft == 0 { setMsg(GAME_PLAY, 4) }
 				    } else {
-					// if veloc is little, compress and move the previously 
-					// resqued animal sideway
+					    // For regular jumps, compress and move the previously resqued sideway
 						prevAnimIndex := lastResquedIndex - 1
 						prevAnim := resqued[prevAnimIndex]
 						prevAnim.press = ANIM_SIZE
@@ -690,8 +692,10 @@ func addMsg(scr *Scripts, duration int, gameMode GameMode, l1, l2 string) {
 
 func setMsg(gameMode GameMode, msgNum int) {
 	assert(gameMode > 0, "GameMode is less than 1 in the setNextMsg function")
-	if msgNum >= len(scripts.msgs[gameMode-1]) { 
-		fmt.Printf("msgNum %d is greater than the msg len for game gameMode %d!\n", msgNum, gameMode)
+	if msgNum >= len(scripts.msgs[gameMode-1]) {
+		if DEBUG {
+		    fmt.Printf("msgNum %d is greater than the msg len for game gameMode %d!\n", msgNum, gameMode)
+	    }
 		msg = Message{}
 	} else {
 	    msg = scripts.msgs[gameMode-1][msgNum]
@@ -754,14 +758,17 @@ func main() {
 	resquedChanged := true
 	mostRecentResqueType := u8(0xFF)  // initially, all front row animals can be resqued.
     numPossibleMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
-    fmt.Printf("numPossibleMoves: %d, %v\n", numPossibleMoves, resquableIndex)
+    
+	if DEBUG {
+	    fmt.Printf("numPossibleMoves: %d, %v\n", numPossibleMoves, resquableIndex)
+    }
 
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
     rl.SetTargetFPS(FPS)
 	rl.InitAudioDevice();
 
-	var titleTexture, groundTexture, animalsTexture, dustTexture rl.Texture2D
-	loadAssets(&titleTexture, &groundTexture, &animalsTexture, &dustTexture, &sounds)
+	//var titleTexture, groundTexture, animalsTexture, dustTexture rl.Texture2D
+	loadAssets();
     
 	// game loop
     for !isQuitting && !rl.WindowShouldClose() {
@@ -840,7 +847,7 @@ func main() {
 					tstate.titleMessageShown = true
 				}
 			    if rl.IsKeyReleased(KEY_SPACE) || rl.IsMouseButtonReleased(MOUSE_LEFT) {
-					fmt.Println("Space released!")
+					if DEBUG { fmt.Println("Space released!") }
                     rl.PlaySound(sounds.Start)
 					for i := 0; i < 3; i++ {
 						titleAnims[i].dest = tstate.destForOpening[i]
@@ -883,8 +890,8 @@ func main() {
 				}
 
 				if numAnimalLeft < BOARD_SIZE && resquedChanged { 
-					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, 
-					       "resqued array has nil")
+					assert(resqued[BOARD_SIZE - numAnimalLeft - 1] != nil, "nil in resqued array")
+					
 					if !firstMoveMade {
 						firstMoveMade = true
 					    setMsg(gameMode, 1)
@@ -901,9 +908,6 @@ func main() {
 					for i := range resquableIndex { resquableIndex[i] = 0 }
 					numNextMoves := findResquables(&board, mostRecentResqueType, &resquableIndex)
 					resquedChanged = false
-					fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
-					fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
-					printbd(&board)
 					if numAnimalLeft == 0 {
                         rl.PlaySound(sounds.Success)
 						gameMode = GAME_CLEAR
@@ -911,27 +915,33 @@ func main() {
                         rl.PlaySound(sounds.Fail)
 						gameMode = GAME_OVER
 					}
+
+					if DEBUG {
+					    fmt.Printf("numNextMoves: %d, %v\n", numNextMoves, resquableIndex)
+					    fmt.Printf("numAnimalLeft: %d\n", numAnimalLeft)
+					    printbd(&board)
+					}
 				}
 
 				if rl.IsKeyDown(KEY_A) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
 				   isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
-					fmt.Println("A pressed!")
+					if DEBUG { fmt.Println("A pressed!") }
 					if resquableIndex[0] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX]) }
 				} else if rl.IsKeyDown(KEY_S) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
-					fmt.Println("S pressed!")
+					if DEBUG { fmt.Println("S pressed!") }
 					if resquableIndex[1] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+1]) }
 				} else if rl.IsKeyDown(KEY_D) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
-					fmt.Println("D pressed!")
+					if DEBUG { fmt.Println("D pressed!") }
 					if resquableIndex[2] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+2]) }
 				} else if rl.IsKeyDown(KEY_F) || (rl.IsMouseButtonDown(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
-					fmt.Println("F pressed!")
+					if DEBUG { fmt.Println("F pressed!") }
 					if resquableIndex[3] != 0 { processKeyDown(board[FRONT_ROW_BASEINDEX+3]) }
 				} else if rl.IsKeyReleased(KEY_A) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX])) {
-					fmt.Println("A released!")
+					if DEBUG { fmt.Println("A released!") }
 					if resquableIndex[0] != 0 {
 						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX, numAnimalLeft)
 						numAnimalLeft--
@@ -940,7 +950,7 @@ func main() {
 					}
 				} else if rl.IsKeyReleased(KEY_S) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 1])) {
-					fmt.Println("S released!")
+					if DEBUG { fmt.Println("S released!") }
 					if resquableIndex[1] != 0 {
 						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 1, numAnimalLeft)
 						numAnimalLeft--
@@ -949,7 +959,7 @@ func main() {
 					}
 				} else if rl.IsKeyReleased(KEY_D) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 2])) {
-					fmt.Println("D released!")
+					if DEBUG { fmt.Println("D released!") }
 					if resquableIndex[2] != 0 {
 						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 2, numAnimalLeft)
 						numAnimalLeft--
@@ -958,7 +968,7 @@ func main() {
 					}
 				} else if rl.IsKeyReleased(KEY_F) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 						  isAnimRectClicked(board[FRONT_ROW_BASEINDEX + 3])) {
-					fmt.Println("F released!")
+					if DEBUG { fmt.Println("F released!") }
 					if resquableIndex[3] != 0 {
 						resqueAt(&board, &resqued, FRONT_ROW_BASEINDEX + 3, numAnimalLeft)
 						numAnimalLeft--
@@ -968,28 +978,14 @@ func main() {
 				} else if resqued[BOARD_SIZE - 1] != nil && (rl.IsKeyReleased(KEY_G) || 
 					(rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 					 isAnimRectClicked(resqued[BOARD_SIZE - 1]))) {
-					fmt.Println("G released!! Play Again!")
+					if DEBUG { fmt.Println("G released!! Play Again!") }
 					resetState(&animals, &board, &resqued, &frontRowPos)
 					numAnimalLeft = BOARD_SIZE
                     bigJumpLeft = TOTAL_BIG_JUMP
 					resquableIndex = [NUM_COL]int{}
 					resquedChanged = true
-					mostRecentResqueType = u8(0xFF)  
+					mostRecentResqueType = u8(0xFF)
 					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
-				} else if resqued[BOARD_SIZE - 1] != nil &&
-					(rl.IsKeyReleased(KEY_Q) || rl.IsMouseButtonReleased(MOUSE_RIGHT)) { 
-					fmt.Println("Quiting Game! Bye!")
-					isQuitting = true
-				} else if rl.IsKeyDown(KEY_Q) {
-					fmt.Println("Q released!! Resetting the board!")
-					resetState(&animals, &board, &resqued, &frontRowPos)
-					numAnimalLeft = BOARD_SIZE
-                    bigJumpLeft = TOTAL_BIG_JUMP
-					resquableIndex = [NUM_COL]int{}
-					resquedChanged = true
-					mostRecentResqueType = u8(0xFF)  
-					numPossibleMoves = findResquables(&board, mostRecentResqueType, &resquableIndex)
-					gameMode = OPENING
 				}
 			}
 
@@ -1009,8 +1005,8 @@ func main() {
 					resetState(&animals, &board, &resqued, &frontRowPos)
 				    time.Sleep(time.Millisecond * 500)
 					gameMode = OPENING
-					willReplay = false
 					msg = Message{}
+					willReplay = false
 					numAnimalLeft = BOARD_SIZE
                     bigJumpLeft = TOTAL_BIG_JUMP
 					resquableIndex = [NUM_COL]int{}
@@ -1022,9 +1018,9 @@ func main() {
 				
 			if !willReplay && rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 			    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
-				fmt.Println("G released on GAME_OVER! Play Again!")
+				if DEBUG { fmt.Println("G released on GAME_Clear! Play Again!") }
                 rl.PlaySound(sounds.Start)
-				for _, anim := range resqued { 
+				for _, anim := range resqued {
 					jumpAnimal(anim, Vec2{anim.pos.X, -ANIM_SIZE} , 24, 20)
 				}
 				willReplay = true
@@ -1058,7 +1054,7 @@ func main() {
 
 				if !willReplay && rl.IsKeyReleased(KEY_G) || (rl.IsMouseButtonReleased(MOUSE_LEFT) && 
 				    isAnimRectClicked(resqued[BOARD_SIZE - 1 - numAnimalLeft])) {
-					fmt.Println("G released on GAME_OVER! Play Again!")
+					if DEBUG { fmt.Println("G released on GAME_OVER! Play Again!") }
                     rl.PlaySound(sounds.Start)
 					for _, anim := range board { 
 						if anim != nil {jumpAnimal(anim, Vec2{anim.pos.X, -ANIM_SIZE}, 24, 20)}
@@ -1074,29 +1070,24 @@ func main() {
 		                                   &numAnimalLeft, &resquedChanged, &bigJumpMade, 
                                            &bigJumpLeft, lastMsgShown)
 
+        // Render
         rl.BeginDrawing()
         {
-			rl.DrawTextureEx(groundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
+			rl.DrawTextureEx(textures.GroundTexture, Vec2{0, 0}, 0, 1, rl.RayWhite)
 			
 			if gameMode == TITLE {
 				
-				drawTitle(&titleTexture, &title)
-				for _, anim := range titleAnims {
-					drawAnimal(&animalsTexture, &dustTexture, anim)
-				}
+				drawTitle(&title)
+				for _, anim := range titleAnims { drawAnimal(anim) }
 
 			} else {
 
 				for i := 0; i < BOARD_SIZE; i++ {
-					if board[i] != nil {
-						drawAnimal(&animalsTexture, &dustTexture, board[i])
-					}
+					if board[i] != nil { drawAnimal(board[i]) }
 				}
 				
 				for i := 0; i < BOARD_SIZE - numAnimalLeft; i++ {
-					if resqued[i] != nil {
-						drawAnimal(&animalsTexture, &dustTexture, resqued[i])
-					}
+					if resqued[i] != nil { drawAnimal(resqued[i]) }
 				}
 			}	
 			if gameMode == msg.gameMode {
@@ -1122,8 +1113,8 @@ func main() {
 						}
 					}
 				}
-				fontColor.A = u8(msg.alpha)
 
+				fontColor.A = u8(msg.alpha)
 				if msg.l2 == "" {
 					rl.DrawText(msg.l1, 0, MSG_POS_Y, DEFAULT_FONT_SIZE, fontColor)
 				} else {
@@ -1136,6 +1127,6 @@ func main() {
         }
         rl.EndDrawing()
     }
-	
-	unloadAssets(&sounds)
+
+	unloadSounds()
 }
