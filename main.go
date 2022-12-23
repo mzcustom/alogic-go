@@ -34,12 +34,12 @@ func assert(b bool, msg string) { if !b { panic("Assert failed: " + msg + "!\n")
 
 // Constants
 const (
+	FPS               = 60
 	WINDOW_WIDTH      = 560
 	WINDOW_HEIGHT     = 800
-	UPPER_LAND_HEIGHT = 560
-	MARGIN_HEIGHT     = 20
-	MARGIN_WIDTH      = 20
-	MSG_BOARD_HEIGHT  = 40
+	UPPER_LAND_HEIGHT = WINDOW_WIDTH
+	MARGIN_HEIGHT     = WINDOW_HEIGHT/40
+	MARGIN_WIDTH      = MARGIN_HEIGHT
 	TITLE_WIDTH		  = WINDOW_WIDTH*0.75
 	TITLE_HEIGHT	  = WINDOW_HEIGHT*0.2
 	MIN_TITLE_HEIGHT  = TITLE_HEIGHT*0.5
@@ -51,24 +51,23 @@ const (
 	ANIM_SIZE f32     = ROW_HEIGHT * 0.65
 	DUST_IMAGE_WIDTH  = 320
 	DUST_IMAGE_HEIGHT = 256
-	MIN_ANIM_HEIGHT	  =	5
+	MIN_ANIM_HEIGHT	  =	WINDOW_HEIGHT/160
 	MIN_JUMP_HEIGHT   = MIN_ANIM_HEIGHT * 3
 	JUMP_SCALE_INC_RATE = 0.075
-	MAX_DUST_DURATION = 20
+	MAX_DUST_DURATION = FPS/3
     FRONT_ROW_Y       = MARGIN_HEIGHT + (NUM_ROW - 1)*ROW_HEIGHT + ROW_HEIGHT/2
 	RESQUE_SPOT_X     = MARGIN_WIDTH + (WINDOW_WIDTH - 2 * MARGIN_WIDTH) / 2 
 	RESQUE_SPOT_Y     = (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT) + 
 						 (WINDOW_HEIGHT - (UPPER_LAND_HEIGHT + 7 * MARGIN_HEIGHT)) / 2 
-	MAX_MSG_LEN       = 48
+	DEFAULT_FONT_SIZE = MARGIN_WIDTH*1.2
+	MAX_MSG_LEN       = DEFAULT_FONT_SIZE*2
 	MSG_POS_Y         = UPPER_LAND_HEIGHT - MARGIN_HEIGHT
-	DEFAULT_FONT_SIZE = 25
 	BOARD_SIZE        = NUM_ROW * NUM_COL
 	FRONT_ROW_BASEINDEX = BOARD_SIZE - NUM_COL
 	NUM_COLOR         = 4
 	NUM_KIND          = 4
 	NUM_GAME_MODE     = 5
 
-	FPS = 60
     TOTAL_BIG_JUMP = 2
 	INDEFINITE = -1
 
@@ -682,10 +681,18 @@ func processKeyDown(anim *Animal) {
 func addMsg(scr *Scripts, duration int, gameMode GameMode, l1, l2 string) {
 	assert(gameMode > 0, "GameMode is less than 1 in the setNextMsg function")
 	for len(l1) < MAX_MSG_LEN {
-		l1 = " " + l1 + " "
+		if f32(len(l1)) < f32(MAX_MSG_LEN*0.6) {
+		    l1 = "     " + l1 + " "
+		} else {
+		    l1 = " " + l1 + " "
+	    }
 	}
 	for l2 != "" && len(l2) < MAX_MSG_LEN {
-		l2 = " " + l2 + " "
+		if f32(len(l2)) < f32(MAX_MSG_LEN*0.6) {
+		    l2 = "     " + l2 + " "
+		} else {
+		    l2 = " " + l2 + " "
+	    }
 	}
 	scr.msgs[gameMode-1] = append(scr.msgs[gameMode-1], Message{l1, l2, duration, 1, false, 0, gameMode})
 }
