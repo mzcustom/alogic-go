@@ -773,11 +773,9 @@ func main() {
     rl.InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Animal Logic")
     rl.SetTargetFPS(FPS)
 	rl.InitAudioDevice();
-
-	//var titleTexture, groundTexture, animalsTexture, dustTexture rl.Texture2D
 	loadAssets();
     
-	// game loop
+	// Game loop
     for !isQuitting && !rl.WindowShouldClose() {
 
 		if msg.frames > 0 {
@@ -790,6 +788,7 @@ func main() {
 
 	    switch gameMode {
 
+			// title mode
 			case TITLE:
 	
 			if tstate.animToDrop < 2 && (tstate.titleFrame == 20 || tstate.titleFrame == 40) { 
@@ -865,6 +864,7 @@ func main() {
 
 			tstate.titleFrame++
 
+			// opening mode
 		    case OPENING:
 
 			frameDiv := openingFrame / 10
@@ -884,6 +884,7 @@ func main() {
 				gameMode = GAME_PLAY
 			}
 
+			// gameplay mode
 		    case GAME_PLAY:
 
 			if isAllAnimUpdated {
@@ -996,6 +997,7 @@ func main() {
 				}
 			}
 
+			// gameclear mode
 		    case GAME_CLEAR:
 
 			if msg.gameMode != gameMode { setMsg(gameMode, 0) }
@@ -1033,6 +1035,7 @@ func main() {
 				willReplay = true
 			}
 
+			// gamover mode
 		    case GAME_OVER:
 			
 			if msg.gameMode != gameMode { setMsg(gameMode, 0) }
@@ -1096,7 +1099,9 @@ func main() {
 				for i := 0; i < BOARD_SIZE - numAnimalLeft; i++ {
 					if resqued[i] != nil { drawAnimal(resqued[i]) }
 				}
-			}	
+			}
+
+			// draw message
 			if gameMode == msg.gameMode {
 				fontColor := rl.Gold
 				if msg.duration == INDEFINITE {
